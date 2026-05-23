@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@layer utilities {
+  /* Dynamic slide-in effect for combat notifications */
+  .animate-slide-in {
+    animation: slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* Sweeping scanning line effect for active military radar tracking */
+  .animate-radar-sweep {
+    animation: radarSweep 4s linear infinite;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes radarSweep {
+  0% {
+    transform: translateY(-100%);
+  }
+  50% {
+    transform: translateY(100%);
+  }
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+/* Custom cursor hover colors for tactical elements */
+.cursor-crosshair {
+  cursor: crosshair !important;
+}
+
+/* Styled scrollbars for military menus and terminal feeds */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(8, 145, 178, 0.4);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(8, 145, 178, 0.7);
+}

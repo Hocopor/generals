@@ -1,0 +1,6 @@
+{
+  "name": "Generals: Modern Conflict",
+  "description": "A 3D modern real-time strategy game with procedural maps and real-time multiplayer lobbies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
