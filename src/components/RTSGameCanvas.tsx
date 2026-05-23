@@ -470,10 +470,54 @@ export default function RTSGameCanvas({
     terrainMesh.receiveShadow = true;
     scene.add(terrainMesh);
 
+    // Track which building entities have already flattened the terrain under them
+    const flattenedBuildingIds = new Set<string>();
+
+    const updateTerrainGeometryHeights = () => {
+      const pAttr = terrainGeo.attributes.position;
+      for (let i = 0; i < pAttr.count; i++) {
+        const vx = pAttr.getX(i);
+        const vz = pAttr.getZ(i);
+        
+        const xIndex = Math.max(0, Math.min(gridS - 1, Math.round(vx)));
+        const zIndex = Math.max(0, Math.min(gridS - 1, Math.round(vz)));
+        
+        const node = map.nodes[xIndex]?.[zIndex] || map.nodes[0][0];
+        const heightVal = node.height;
+        
+        pAttr.setY(i, heightVal * 1.6);
+      }
+      pAttr.needsUpdate = true;
+      terrainGeo.computeVertexNormals();
+    };
+
+    const flattenTerrainForBuilding = (bx: number, bz: number, radius: number = 2) => {
+      if (!map || !map.nodes) return;
+      // Get the height at the center of the building footprint
+      const buildH = map.nodes[bx]?.[bz]?.height ?? 0.0;
+      
+      // Flatten nodes around the building coordinates
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dz = -radius; dz <= radius; dz++) {
+          const tx = bx + dx;
+          const tz = bz + dz;
+          if (map.nodes[tx]?.[tz]) {
+            const node = map.nodes[tx][tz];
+            node.height = buildH;
+            if (node.type !== 'water') {
+              node.type = 'plain';
+            }
+          }
+        }
+      }
+      
+      updateTerrainGeometryHeights();
+    };
+
     // Glistening navy-blue transparent water plane fills river channels nicely
     const waterGeo = new THREE.PlaneGeometry(gridS, gridS);
     waterGeo.rotateX(-Math.PI / 2);
-    waterGeo.translate(gridS / 2, -0.22, gridS / 2); // Sea depth below dry areas
+    waterGeo.translate(gridS / 2, -0.28, gridS / 2); // Sea depth below dry areas
 
     const waterMat = new THREE.MeshStandardMaterial({
       color: '#0e3a60',
@@ -486,23 +530,12 @@ export default function RTSGameCanvas({
     const waterMesh = new THREE.Mesh(waterGeo, waterMat);
     scene.add(waterMesh);
 
-    // Add a modern wireframe grid sitting slightly above terrain to trace heights
-    const wireGeo = terrainGeo.clone();
-    wireGeo.translate(0, 0.02, 0); // lift slightly
-    const wireMat = new THREE.MeshBasicMaterial({
-      color: '#22d3ee',
-      wireframe: true,
-      transparent: true,
-      opacity: 0.045 // ultra-subtle coordinate lines
-    });
-    const wireMesh = new THREE.Mesh(wireGeo, wireMat);
-    scene.add(wireMesh);
-
     // Add resource spots explicitly with cool spinning oil rigs and yellow light flares!
     const resourceGeoms: THREE.Group[] = [];
     map.resourceSpots.forEach(spot => {
       const group = new THREE.Group();
-      group.position.set(spot.x, 0.05, spot.z);
+      const spotH = getTerrainHeight(spot.x, spot.z, map);
+      group.position.set(spot.x, spotH + 0.05, spot.z);
 
       // Base plate
       const base = new THREE.Mesh(
@@ -1450,6 +1483,13 @@ export default function RTSGameCanvas({
           return;
         }
 
+        // Automatic continuous ground flattening under newly deployed buildings
+        if (ent.type === 'building' && !flattenedBuildingIds.has(ent.id)) {
+          flattenedBuildingIds.add(ent.id);
+          const radius = ent.subType === 'command_center' ? 3 : 2;
+          flattenTerrainForBuilding(ent.x, ent.z, radius);
+        }
+
         // Global cooldown tick decrement! Corrects lock conditions and EMP duration.
         if (ent.cooldown && ent.cooldown > 0) {
           ent.cooldown -= 1;
@@ -2246,8 +2286,6 @@ export default function RTSGameCanvas({
       renderer.dispose();
       terrainGeo.dispose();
       terrainMat.dispose();
-      wireGeo.dispose();
-      wireMat.dispose();
       placeBoxGeo.dispose();
       placeBoxMat.dispose();
       beaconGeo.dispose();

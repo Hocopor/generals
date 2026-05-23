@@ -142,8 +142,9 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
   // 3. Generate a winding, realistic river dividing the battleground
   // Choose horizontal or vertical river flows
   const riverIsHorizontal = fbm(seed, seed) > 0.5;
-  const riverWidth = 3.5;
-  const bridgeWidth = 4.0; // wider bridges for easier tank crossings
+  const riverWidth = 4.0;
+  const shoreWidth = 4.0;
+  const bridgeWidth = 4.5; // wider bridges for easier tank crossings
 
   // List of bridges to place along the flow
   const bridgePositions = [Math.floor(size * 0.28), Math.floor(size * 0.72)];
@@ -154,31 +155,30 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
       // Smooth sinusoidal snake wave + noise sway
       const riverCenterZ = midZ + Math.sin(x * 0.12) * 7 + getNoise(x, 100, 0.05) * 5;
       
+      const isAtBridge = bridgePositions.some(bp => Math.abs(x - bp) < bridgeWidth);
+
       for (let z = 0; z < size; z++) {
         const distToCenter = Math.abs(z - riverCenterZ);
         
         if (distToCenter < riverWidth) {
-          // Check if this column is a bridge site
-          const isAtBridge = bridgePositions.some(bp => Math.abs(x - bp) < bridgeWidth);
-          
           if (isAtBridge) {
-            // Flatten roads and approaches on bridges
             nodes[x][z].height = 0.0;
             nodes[x][z].type = 'bridge';
           } else {
-            // Smoothly carve the river profile (deepest in the center)
-            const depthFactor = 1.0 - (distToCenter / riverWidth); // 0 at shoreline, 1 in center
-            const finalDepth = -0.8 * (depthFactor * depthFactor); // parabolic bed
-            
+            const depthFactor = distToCenter / riverWidth; // 1 at shore, 0 at center
+            const finalDepth = -0.8 + 0.65 * (depthFactor * depthFactor);
             nodes[x][z].height = finalDepth;
             nodes[x][z].type = 'water';
           }
-        } else if (distToCenter < riverWidth + 3.0) {
-          // Smooth sand shoulder transition (shoreline beach)
-          const shoreFactor = (distToCenter - riverWidth) / 3.0; // 0 to 1
-          const targetH = nodes[x][z].height;
-          // Smoothly raise from river bed side to normal ground height!
-          nodes[x][z].height = -0.4 * (1.0 - shoreFactor) + targetH * shoreFactor;
+        } else if (distToCenter < riverWidth + shoreWidth) {
+          if (isAtBridge) {
+            nodes[x][z].height = 0.0;
+            nodes[x][z].type = 'bridge';
+          } else {
+            const shoreFactor = (distToCenter - riverWidth) / shoreWidth;
+            const targetH = nodes[x][z].height;
+            nodes[x][z].height = -0.15 * (1.0 - shoreFactor) + targetH * shoreFactor;
+          }
         }
       }
     }
@@ -188,26 +188,30 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
     for (let z = 0; z < size; z++) {
       const riverCenterX = midX + Math.sin(z * 0.12) * 7 + getNoise(100, z, 0.05) * 5;
       
+      const isAtBridge = bridgePositions.some(bp => Math.abs(z - bp) < bridgeWidth);
+
       for (let x = 0; x < size; x++) {
         const distToCenter = Math.abs(x - riverCenterX);
         
         if (distToCenter < riverWidth) {
-          const isAtBridge = bridgePositions.some(bp => Math.abs(z - bp) < bridgeWidth);
-          
           if (isAtBridge) {
             nodes[x][z].height = 0.0;
             nodes[x][z].type = 'bridge';
           } else {
-            const depthFactor = 1.0 - (distToCenter / riverWidth);
-            const finalDepth = -0.8 * (depthFactor * depthFactor);
-            
+            const depthFactor = distToCenter / riverWidth;
+            const finalDepth = -0.8 + 0.65 * (depthFactor * depthFactor);
             nodes[x][z].height = finalDepth;
             nodes[x][z].type = 'water';
           }
-        } else if (distToCenter < riverWidth + 3.0) {
-          const shoreFactor = (distToCenter - riverWidth) / 3.0;
-          const targetH = nodes[x][z].height;
-          nodes[x][z].height = -0.4 * (1.0 - shoreFactor) + targetH * shoreFactor;
+        } else if (distToCenter < riverWidth + shoreWidth) {
+          if (isAtBridge) {
+            nodes[x][z].height = 0.0;
+            nodes[x][z].type = 'bridge';
+          } else {
+            const shoreFactor = (distToCenter - riverWidth) / shoreWidth;
+            const targetH = nodes[x][z].height;
+            nodes[x][z].height = -0.15 * (1.0 - shoreFactor) + targetH * shoreFactor;
+          }
         }
       }
     }
@@ -229,6 +233,8 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
     sx = Math.max(7, Math.min(size - 8, sx));
     sz = Math.max(7, Math.min(size - 8, sz));
 
+    const centerNodeH = nodes[sx]?.[sz]?.height ?? 0.0;
+
     // Flatten bases inside an 8x8 radius to guarantee easy base building layout
     for (let dx = -5; dx <= 5; dx++) {
       for (let dz = -5; dz <= 5; dz++) {
@@ -241,12 +247,12 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
           
           if (distFromBase < 5.0) {
             // Flatten completely
-            node.height = 0.0;
+            node.height = centerNodeH;
             node.type = 'plain';
           } else if (distFromBase < 6.5) {
             // Smooth transition outline
             const factor = (distFromBase - 5.0) / 1.5;
-            node.height = node.height * factor;
+            node.height = centerNodeH * (1.0 - factor) + node.height * factor;
             if (node.type === 'water') {
               node.type = 'plain';
             }
@@ -265,7 +271,7 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
 
   // 5. Spawn strategic supply oil derricks / gold spots
   const resourceSpots: { x: number; z: number }[] = [];
-  const spotsToPlace = Math.min(8, players.length * 2 + 1);
+  const spotsToPlace = Math.min(16, players.length * 4 + 2);
 
   // Center strategic derrick
   const centerNodeX = Math.floor(size / 2);
@@ -273,14 +279,13 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
   let centerNode = nodes[centerNodeX]?.[centerNodeZ];
   if (centerNode) {
     centerNode.resourceSpot = true;
-    centerNode.height = 0.0;
     centerNode.type = 'plain';
     resourceSpots.push({ x: centerNodeX, z: centerNodeZ });
   }
 
   // Flanker and center-perpendicular corridors
   let resourceAttempts = 0;
-  while (resourceSpots.length < spotsToPlace && resourceAttempts < 150) {
+  while (resourceSpots.length < spotsToPlace && resourceAttempts < 250) {
     resourceAttempts++;
     const rx = Math.floor(rand() * (size - 16)) + 8;
     const rz = Math.floor(rand() * (size - 16)) + 8;
@@ -310,7 +315,6 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
       const node = nodes[rx][rz];
       if (node.type !== 'water' && node.type !== 'bridge') {
         node.resourceSpot = true;
-        node.height = 0.0; // Flatten resources for refinery placement
         node.type = 'plain';
         resourceSpots.push({ x: rx, z: rz });
       }

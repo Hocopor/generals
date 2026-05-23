@@ -135,7 +135,7 @@ export default function App() {
       status: 'playing',
       countdownLeft: 0,
       mapSeed: Math.floor(Math.random() * 100000),
-      mapSize: aiUnits.length <= 1 ? 120 : aiUnits.length <= 3 ? 160 : 200
+      mapSize: aiUnits.length <= 1 ? 180 : aiUnits.length <= 3 ? 240 : 300
     };
 
     setLobby(mockLobby);

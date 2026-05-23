@@ -113,7 +113,7 @@ wss.on("connection", (ws: WebSocket) => {
               status: "waiting",
               countdownLeft: 0,
               mapSeed: Math.floor(Math.random() * 100000),
-              mapSize: 60 // Starts small, scales with player count
+              mapSize: 180 // Starts small, scales with player count
             };
             lobbies.set(targetLobbyId, lobby);
           }
@@ -137,7 +137,7 @@ wss.on("connection", (ws: WebSocket) => {
               status: "waiting",
               countdownLeft: 60,
               mapSeed: Math.floor(Math.random() * 100000),
-              mapSize: 60
+              mapSize: 180
             };
             lobbies.set(targetLobbyId, lobby);
           }
@@ -170,12 +170,12 @@ wss.on("connection", (ws: WebSocket) => {
         lobby.players.push(newPlayer);
 
         // Adjust map size dynamically based on player count so they do not crowd a tiny map!
-        // 2 players: 60x60, 3 players: 80x80, 4 players: 100x100, 5 players: 120x120
+        // 2 players: 180x180, 3 players: 240x240, 4 players: 300x300, 5 players: 360x360
         const activeCount = lobby.players.length;
-        if (activeCount <= 2) lobby.mapSize = 60;
-        else if (activeCount === 3) lobby.mapSize = 80;
-        else if (activeCount === 4) lobby.mapSize = 100;
-        else lobby.mapSize = 120;
+        if (activeCount <= 2) lobby.mapSize = 180;
+        else if (activeCount === 3) lobby.mapSize = 240;
+        else if (activeCount === 4) lobby.mapSize = 300;
+        else lobby.mapSize = 360;
 
         // In Matchmaking, trigger countdown if we go from 1 to 2 players
         if (!lobby.isCustom) {
@@ -335,12 +335,12 @@ wss.on("connection", (ws: WebSocket) => {
             lobby.players[0].isHost = true;
           }
 
-          // Recalculate map size or adjust matchmaking state
+           // Recalculate map size or adjust matchmaking state
           const activeCount = lobby.players.length;
-          if (activeCount <= 2) lobby.mapSize = 60;
-          else if (activeCount === 3) lobby.mapSize = 80;
-          else if (activeCount === 4) lobby.mapSize = 100;
-          else lobby.mapSize = 120;
+          if (activeCount <= 2) lobby.mapSize = 180;
+          else if (activeCount === 3) lobby.mapSize = 240;
+          else if (activeCount === 4) lobby.mapSize = 300;
+          else lobby.mapSize = 360;
 
           if (!lobby.isCustom) {
             if (activeCount < 2 && lobby.status === "countdown") {
