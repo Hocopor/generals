@@ -51,10 +51,14 @@ function getTerrainHeight(x: number, z: number, map: GeneratedMap): number {
   const tx = x - x1;
   const tz = z - z1;
   
-  const top = h11 * (1 - tx) + h21 * tx;
-  const bottom = h12 * (1 - tx) + h22 * tx;
-  
-  return top * (1 - tz) + bottom * tz;
+  // Three.js PlaneGeometry splits quads along the BL-TR diagonal (tx + tz = 1)
+  if (tx + tz <= 1) {
+    // Top-Left Triangle
+    return h11 + (h21 - h11) * tx + (h12 - h11) * tz;
+  } else {
+    // Bottom-Right Triangle
+    return h22 + (h12 - h22) * (1 - tx) + (h21 - h22) * (1 - tz);
+  }
 }
 
 export default function RTSGameCanvas({
