@@ -85,6 +85,9 @@ export default function LobbyPanel({
   const uniqueTeams = lobby ? new Set(lobby.players.map(p => p.team)) : new Set();
   const allOnSameTeam = lobby ? (lobby.players.length > 1 && uniqueTeams.size <= 1) : false;
 
+  const playerAndAiTeams = new Set([selectedTeam, ...aiSetups.map(ai => ai.team)]);
+  const isSingleplayerAllSameTeam = aiCount > 0 && playerAndAiTeams.size <= 1;
+
   useEffect(() => {
     localStorage.setItem('cnc_playerName', playerName);
   }, [playerName]);
@@ -645,11 +648,20 @@ export default function LobbyPanel({
                         ))}
                       </div>
                     </div>
+                    {isSingleplayerAllSameTeam && (
+                      <div className="mt-3.5 bg-rose-950/40 border border-rose-800/60 p-3.5 rounded-lg flex gap-3 text-rose-300">
+                        <span className="h-2 w-2 rounded-full bg-rose-500 animate-ping mt-1.5 shrink-0" />
+                        <p className="text-[11px] font-mono">
+                          <strong className="text-rose-100">БЛОКИРОВКА ЗАПУСКА:</strong> Вы и все ИИ-противники выбрали одинаковую команду! Измените номер команды у себя или у ботов, чтобы распределиться по воюющим сторонам.
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   <button
                     onClick={handleLaunchSingleplayer}
-                    className="w-full mt-6 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold uppercase tracking-widest py-3.5 px-6 rounded shadow-lg shadow-cyan-900/20 hover:scale-[1.02] transform transition cursor-pointer"
+                    disabled={isSingleplayerAllSameTeam}
+                    className="w-full mt-6 bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed hover:scale-[1.01] transform text-slate-950 font-bold uppercase tracking-widest py-3.5 px-6 rounded shadow-lg shadow-cyan-900/20 transition cursor-pointer"
                   >
                     НАЧАТЬ ОДИНОЧНЫЙ БОЙ
                   </button>

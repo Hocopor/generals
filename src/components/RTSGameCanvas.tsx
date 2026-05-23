@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { Faction, Lobby, Player, GameEntity, BuildingType, UnitType, GameActionEvent } from '../types';
 import { sound } from '../utils/audio';
 import { generateProceduralMap, GeneratedMap, MapNode } from '../utils/mapGenerator';
+import { getFactionUnitProperties, getFactionBuildingProperties } from '../utils/factionProperties';
 import { Shield, Zap, Sparkles, Swords, Play, Compass, RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface RTSGameCanvasProps {
@@ -20,7 +21,7 @@ const UNIT_PROPERTIES: Record<UnitType, { name: string; hp: number; speed: numbe
   drone_scout: { name: 'Дрон-разведчик', hp: 60, speed: 2.5, range: 3.5, dps: 12, cost: 150, desc: 'Быстрый воздушный разведчик с мощным радаром.' },
   drone_kamikaze: { name: 'Дрон-камикадзе', hp: 45, speed: 3.2, range: 1.0, dps: 200, cost: 200, desc: 'Барражирующий боеприпас. Самодетонирует при ударе.' },
   cyber_specops: { name: 'Спецназ ССО', hp: 80, speed: 1.4, range: 4.5, dps: 18, cost: 250, desc: 'Элитная пехота. Может захватывать нефтяные вышки.' },
-  precision_tank: { name: 'Лазерный Танк', hp: 260, speed: 1.1, range: 6.0, dps: 32, cost: 500, desc: 'Основная боевая машина. Высокая броня и прочность.' },
+  precision_tank: { name: 'Лазерный Танк', hp: 260, speed: 1.1, range: 6.0, dps: 24, cost: 500, desc: 'Основная боевая машина. Высокая броня и прочность.' },
   artillery_mlrs: { name: 'РСЗО Торнадо', hp: 130, speed: 0.8, range: 11.0, dps: 45, cost: 650, desc: 'Тяжелая ракетная артиллерия дальнего боя. Осадный специалист.' },
   mobile_jammer: { name: 'РЭБ Глушитель', hp: 160, speed: 1.3, range: 0, dps: 0, cost: 400, desc: 'Отключает вражеские турели и маскирует союзников поблизости.' }
 };
@@ -33,6 +34,19 @@ const BUILDING_PROPERTIES: Record<BuildingType, { name: string; hp: number; cost
   war_factory: { name: 'Военный Завод', hp: 850, cost: 600, power: -25, desc: 'Строит наземную технику: танки, артиллерию и машины РЭБ.' },
   defense_turret: { name: 'Лазерная Турель', hp: 700, cost: 350, power: -20, desc: 'Автоматическая оборонительная турель против наземных и воздушных целей.' }
 };
+
+function getFaction(playerId: string, players: Player[]): Faction {
+  const p = players.find(x => x.id === playerId);
+  return p ? p.faction : 'Alliance';
+}
+
+function getUnitProps(unitType: UnitType, playerId: string, players: Player[]) {
+  return getFactionUnitProperties(unitType, getFaction(playerId, players));
+}
+
+function getBuildingProps(bType: BuildingType, playerId: string, players: Player[]) {
+  return getFactionBuildingProperties(bType, getFaction(playerId, players));
+}
 
 // Helper to get smooth terrain height using bilinear interpolation
 function getTerrainHeight(x: number, z: number, map: GeneratedMap): number {
@@ -181,14 +195,15 @@ export default function RTSGameCanvas({
     // Spawn starting structures: Command Center for each alive participator!
     const startingEntities: GameEntity[] = [];
     computedMap.startingBases.forEach((base) => {
+      const bProps = getBuildingProps('command_center', base.playerId, fullPlayersList);
       const bObj: GameEntity = {
         id: `spawn_cc_${base.playerId}`,
         type: 'building',
         subType: 'command_center',
         playerId: base.playerId,
         team: base.team,
-        health: BUILDING_PROPERTIES.command_center.hp,
-        maxHealth: BUILDING_PROPERTIES.command_center.hp,
+        health: bProps.hp,
+        maxHealth: bProps.hp,
         x: base.x,
         z: base.z,
         angle: 0,
@@ -201,14 +216,15 @@ export default function RTSGameCanvas({
       const guardTypes: UnitType[] = ['drone_scout', 'precision_tank'];
       guardTypes.forEach((gt, uIdx) => {
         const theta = (uIdx * 2 * Math.PI) / guardTypes.length;
+        const uProps = getUnitProps(gt, base.playerId, fullPlayersList);
         startingEntities.push({
           id: `spawn_guard_${base.playerId}_${uIdx}`,
           type: 'unit',
           subType: gt,
           playerId: base.playerId,
           team: base.team,
-          health: UNIT_PROPERTIES[gt].hp,
-          maxHealth: UNIT_PROPERTIES[gt].hp,
+          health: uProps.hp,
+          maxHealth: uProps.hp,
           x: base.x + Math.cos(theta) * 3,
           z: base.z + Math.sin(theta) * 3,
           angle: theta,
@@ -1052,7 +1068,8 @@ export default function RTSGameCanvas({
 
     // Order constructions
     function triggerConstructionAction(bType: BuildingType, x: number, z: number) {
-      const cost = BUILDING_PROPERTIES[bType].cost;
+      const bProps = getBuildingProps(bType, playerId, sim.players);
+      const cost = bProps.cost;
       if (sim.credits < cost) {
         pushNotification('Insufficient funds to deploy building structures!', 'warn');
         sim.buildingToPlace = null;
@@ -1111,8 +1128,8 @@ export default function RTSGameCanvas({
         subType: bType,
         playerId,
         team: selfPlayer.team,
-        health: BUILDING_PROPERTIES[bType].hp,
-        maxHealth: BUILDING_PROPERTIES[bType].hp,
+        health: bProps.hp,
+        maxHealth: bProps.hp,
         x,
         z,
         angle: 0,
@@ -1281,14 +1298,15 @@ export default function RTSGameCanvas({
 
           if (act.event === 'build') {
             sound.playConstruction();
+            const bProps = getBuildingProps(act.buildingType, authorId, sim.players);
             sim.entities.push({
               id: act.id,
               type: 'building',
               subType: act.buildingType,
               playerId: authorId,
               team: getPlayerTeam(authorId),
-              health: BUILDING_PROPERTIES[act.buildingType].hp,
-              maxHealth: BUILDING_PROPERTIES[act.buildingType].hp,
+              health: bProps.hp,
+              maxHealth: bProps.hp,
               x: act.x,
               z: act.z,
               angle: 0,
@@ -1304,14 +1322,15 @@ export default function RTSGameCanvas({
             const fx = factory ? factory.x : map.size / 2;
             const fz = factory ? factory.z + 2 : map.size / 2;
 
+            const uProps = getUnitProps(act.unitType, authorId, sim.players);
             sim.entities.push({
               id: act.id,
               type: 'unit',
               subType: act.unitType,
               playerId: authorId,
               team: getPlayerTeam(authorId),
-              health: UNIT_PROPERTIES[act.unitType].hp,
-              maxHealth: UNIT_PROPERTIES[act.unitType].hp,
+              health: uProps.hp,
+              maxHealth: uProps.hp,
               x: fx,
               z: fz,
               angle: Math.PI,
@@ -1439,7 +1458,7 @@ export default function RTSGameCanvas({
         // Keep track of power variables
         if (ent.playerId === playerId) {
           if (ent.type === 'building' && ent.buildProgress && ent.buildProgress >= 1) {
-            const props = BUILDING_PROPERTIES[ent.subType as BuildingType];
+            const props = getBuildingProps(ent.subType as BuildingType, ent.playerId, sim.players);
             if (props.power > 0) cacheGen += props.power;
             else cacheReq += Math.abs(props.power);
 
@@ -1522,7 +1541,7 @@ export default function RTSGameCanvas({
           const dz = ent.targetZ - ent.z;
           const dist = Math.sqrt(dx * dx + dz * dz);
 
-          const maxSp = UNIT_PROPERTIES[ent.subType as UnitType].speed * 0.08;
+          const maxSp = getUnitProps(ent.subType as UnitType, ent.playerId, sim.players).speed * 0.08;
 
           if (dist > 0.4) {
             // Apply step toward target
@@ -1548,7 +1567,7 @@ export default function RTSGameCanvas({
         if (ent.type === 'unit' && ent.state === 'idle') {
           // Auto acquire targets if idle
           let closestHostile: GameEntity | null = null;
-          let minRange = (UNIT_PROPERTIES[ent.subType as UnitType]?.range || 5) + 2.5; // aggressive radius
+          let minRange = (getUnitProps(ent.subType as UnitType, ent.playerId, sim.players)?.range || 5) + 2.5; // aggressive radius
           
           sim.entities.forEach(v => {
             if (v.state === 'dead' || v.team === ent.team) return;
@@ -1577,7 +1596,7 @@ export default function RTSGameCanvas({
             const dz = victim.z - ent.z;
             const dist = Math.sqrt(dx * dx + dz * dz);
 
-            const props = UNIT_PROPERTIES[ent.subType as UnitType];
+            const props = getUnitProps(ent.subType as UnitType, ent.playerId, sim.players);
 
             // Direct facing turns
             const angleVal = Math.atan2(dz, dx);
@@ -1745,7 +1764,7 @@ export default function RTSGameCanvas({
               activeProjectiles.push({
                   mesh: pMesh,
                   targetId: target.id,
-                  damage: 35 / (50/20), // Balance slightly lower since 20cd vs 40cd original = 40/20 instead of 50/20? Wait, original was 40. So 35 / (40/20) = 17.5.
+                  damage: 10, // Slightly reduced laser defense turret damage as requested (dps balanced)
                   speed: 0.7,
                   subType: 'laser',
                   x: ent.x,
@@ -1918,14 +1937,15 @@ export default function RTSGameCanvas({
             if (powerPlants.length === 0 && aiState.timer >= 10) {
               const bx = aiCc.x - 5;
               const bz = aiCc.z - 2;
+              const bProps = getBuildingProps('power_plant', p.id, sim.players);
               sim.entities.push({
                 id: `ai_pp_${Date.now()}`,
                 type: 'building',
                 subType: 'power_plant',
                 playerId: p.id,
                 team: p.team,
-                health: BUILDING_PROPERTIES.power_plant.hp,
-                maxHealth: BUILDING_PROPERTIES.power_plant.hp,
+                health: bProps.hp,
+                maxHealth: bProps.hp,
                 x: bx,
                 z: bz,
                 angle: 0,
@@ -1956,14 +1976,15 @@ export default function RTSGameCanvas({
               });
 
               if (nearestDerrick) {
+                const bProps = getBuildingProps('supply_refinery', p.id, sim.players);
                 sim.entities.push({
                   id: `ai_ref_${Date.now()}`,
                   type: 'building',
                   subType: 'supply_refinery',
                   playerId: p.id,
                   team: p.team,
-                  health: BUILDING_PROPERTIES.supply_refinery.hp,
-                  maxHealth: BUILDING_PROPERTIES.supply_refinery.hp,
+                  health: bProps.hp,
+                  maxHealth: bProps.hp,
                   x: nearestDerrick.x,
                   z: nearestDerrick.z,
                   angle: 0,
@@ -1977,14 +1998,15 @@ export default function RTSGameCanvas({
             else if (!barracks && refineries.length > 0 && aiState.timer >= 45) {
               const bx = aiCc.x + 4;
               const bz = aiCc.z - 4;
+              const bProps = getBuildingProps('barracks', p.id, sim.players);
               sim.entities.push({
                 id: `ai_b_${Date.now()}`,
                 type: 'building',
                 subType: 'barracks',
                 playerId: p.id,
                 team: p.team,
-                health: BUILDING_PROPERTIES.barracks.hp,
-                maxHealth: BUILDING_PROPERTIES.barracks.hp,
+                health: bProps.hp,
+                maxHealth: bProps.hp,
                 x: bx,
                 z: bz,
                 angle: 0,
@@ -1997,14 +2019,15 @@ export default function RTSGameCanvas({
             else if (barracks && !warFactories && aiState.timer >= 65) {
               const bx = aiCc.x - 3;
               const bz = aiCc.z + 5;
+              const bProps = getBuildingProps('war_factory', p.id, sim.players);
               sim.entities.push({
                 id: `ai_wf_${Date.now()}`,
                 type: 'building',
                 subType: 'war_factory',
                 playerId: p.id,
                 team: p.team,
-                health: BUILDING_PROPERTIES.war_factory.hp,
-                maxHealth: BUILDING_PROPERTIES.war_factory.hp,
+                health: bProps.hp,
+                maxHealth: bProps.hp,
                 x: bx,
                 z: bz,
                 angle: 0,
@@ -2018,14 +2041,15 @@ export default function RTSGameCanvas({
               // Build standard defensive turret guarding the front
               const bx = aiCc.x + 3;
               const bz = aiCc.z + 4;
+              const bProps = getBuildingProps('defense_turret', p.id, sim.players);
               sim.entities.push({
                 id: `ai_tur_${Date.now()}`,
                 type: 'building',
                 subType: 'defense_turret',
                 playerId: p.id,
                 team: p.team,
-                health: BUILDING_PROPERTIES.defense_turret.hp,
-                maxHealth: BUILDING_PROPERTIES.defense_turret.hp,
+                health: bProps.hp,
+                maxHealth: bProps.hp,
                 x: bx,
                 z: bz,
                 angle: 0,
@@ -2047,14 +2071,15 @@ export default function RTSGameCanvas({
             
             if (barracks && barracks.state !== 'constructing' && aiForces.length < 15 && Math.random() > 0.45) {
               const utToSpawn: UnitType = Math.random() > 0.5 ? 'drone_scout' : 'drone_kamikaze';
+              const uProps = getUnitProps(utToSpawn, p.id, sim.players);
               sim.entities.push({
                 id: `ai_u_${Date.now()}_r`,
                 type: 'unit',
                 subType: utToSpawn,
                 playerId: p.id,
                 team: p.team,
-                health: UNIT_PROPERTIES[utToSpawn].hp,
-                maxHealth: UNIT_PROPERTIES[utToSpawn].hp,
+                health: uProps.hp,
+                maxHealth: uProps.hp,
                 x: barracks.x + (Math.random() - 0.5) * 4,
                 z: barracks.z + 3,
                 angle: Math.PI,
@@ -2065,14 +2090,15 @@ export default function RTSGameCanvas({
             // Train tanks if war factory is ready and operational
             if (warFactories && warFactories.state !== 'constructing' && aiForces.length < 15 && Math.random() > 0.40) {
               const utToSpawn: UnitType = Math.random() > 0.65 ? 'artillery_mlrs' : 'precision_tank';
+              const uProps = getUnitProps(utToSpawn, p.id, sim.players);
               sim.entities.push({
                 id: `ai_u_${Date.now()}_rt`,
                 type: 'unit',
                 subType: utToSpawn,
                 playerId: p.id,
                 team: p.team,
-                health: UNIT_PROPERTIES[utToSpawn].hp,
-                maxHealth: UNIT_PROPERTIES[utToSpawn].hp,
+                health: uProps.hp,
+                maxHealth: uProps.hp,
                 x: warFactories.x + (Math.random() - 0.5) * 4,
                 z: warFactories.z + 3,
                 angle: Math.PI,
@@ -2233,7 +2259,8 @@ export default function RTSGameCanvas({
 
   // Production queue controller triggers
   const handleTrainUnit = (unitType: UnitType) => {
-    const cost = UNIT_PROPERTIES[unitType].cost;
+    const uProps = getFactionUnitProperties(unitType, selfPlayer.faction);
+    const cost = uProps.cost;
     if (credits < cost) {
       pushNotification('Недостаточно средств для мобилизации сил.', 'warn');
       return;
@@ -2273,8 +2300,8 @@ export default function RTSGameCanvas({
       subType: unitType,
       playerId,
       team: selfPlayer.team,
-      health: UNIT_PROPERTIES[unitType].hp,
-      maxHealth: UNIT_PROPERTIES[unitType].hp,
+      health: uProps.hp,
+      maxHealth: uProps.hp,
       x: producingFactory.x,
       z: producingFactory.z + 2, // rollout door offsets
       angle: Math.PI,
@@ -2289,7 +2316,7 @@ export default function RTSGameCanvas({
       }));
     }
 
-    pushNotification(`${UNIT_PROPERTIES[unitType].name} выходит со сборочной линии.`, 'success');
+    pushNotification(`${uProps.name} выходит со сборочной линии.`, 'success');
   };
 
   const activeConstructionMode = (type: BuildingType) => {
@@ -2462,7 +2489,7 @@ export default function RTSGameCanvas({
               <h4 className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold mb-2">РАЗВЕРТЫВАНИЕ СТРОЕНИЙ</h4>
               <div className="grid grid-cols-3 gap-1.5">
                 {(['power_plant', 'supply_refinery', 'barracks', 'war_factory', 'defense_turret'] as BuildingType[]).map(key => {
-                  const prop = BUILDING_PROPERTIES[key];
+                  const prop = getFactionBuildingProperties(key, selfPlayer.faction);
                   const active = buildingToPlace === key;
                   return (
                     <button
@@ -2488,7 +2515,7 @@ export default function RTSGameCanvas({
               <h4 className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold mb-2">ПРОИЗВОДСТВО ВОЙСК</h4>
               <div className="grid grid-cols-3 gap-1.5">
                 {(['drone_scout', 'drone_kamikaze', 'cyber_specops', 'precision_tank', 'artillery_mlrs', 'mobile_jammer'] as UnitType[]).map(key => {
-                  const prop = UNIT_PROPERTIES[key];
+                  const prop = getFactionUnitProperties(key, selfPlayer.faction);
                   return (
                     <button
                       key={key}
