@@ -69,6 +69,13 @@ setInterval(() => {
       
       // If countdown finishes, start the game
       if (lobby.countdownLeft <= 0) {
+        // Enforce team distribution if everyone chose the same team
+        const teams = new Set(lobby.players.map(p => p.team));
+        if (lobby.players.length > 1 && teams.size <= 1) {
+          lobby.players.forEach((p, index) => {
+            p.team = index + 1; // force different teams
+          });
+        }
         lobby.status = "playing";
         broadcastLobbyState(lobbyId);
       } else {
@@ -231,9 +238,31 @@ wss.on("connection", (ws: WebSocket) => {
         // Only Host can start Custom game
         const player = lobby.players.find(p => p.id === session.playerId);
         if (player && player.isHost) {
+          // Check if all players are on the same team
+          const teams = new Set(lobby.players.map(p => p.team));
+          if (lobby.players.length > 1 && teams.size <= 1) {
+            return; // Block start if all players are on the same team
+          }
           lobby.status = "playing";
           broadcastLobbyState(session.lobbyId);
         }
+      }
+
+      else if (data.type === "return_to_lobby") {
+        if (!session) return;
+        const lobby = lobbies.get(session.lobbyId);
+        if (!lobby) return;
+
+        // Reset lobby status back to waiting so they can play again in the same lobby!
+        lobby.status = "waiting";
+        lobby.mapSeed = Math.floor(Math.random() * 100000);
+        
+        // Reset readiness so they can verify before starting next game
+        lobby.players.forEach(p => {
+          p.isReady = lobby.isCustom ? p.isHost : false;
+        });
+
+        broadcastLobbyState(session.lobbyId);
       }
 
       else if (data.type === "chat") {

@@ -76,6 +76,9 @@ export default function App() {
             setIsSingleplayer(false);
             setGameState('playing');
             sound.playLaunch();
+          } else if (l.status === 'waiting' || l.status === 'countdown') {
+            // Transition back to lobby view when multiplayer game resets
+            setGameState('lobby');
           }
         }
 
@@ -189,6 +192,16 @@ export default function App() {
     sound.playClick();
   };
 
+  const handleReturnToLobby = () => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'return_to_lobby'
+      }));
+    } else {
+      handleLeaveLobby();
+    }
+  };
+
   const handleGameOver = (winnerTeam: number, isVictory: boolean) => {
     setGameResult({ winnerTeam, isVictory });
     setGameState('game_over');
@@ -276,13 +289,30 @@ export default function App() {
                 : 'Тактическая тревога! Ваш Командный Центр разрушен ударными силами противника. Координаты отступления активированы.'}
             </p>
 
-            <div className="pt-4 border-t border-slate-800 flex gap-4">
-              <button
-                onClick={handleLeaveLobby}
-                className="flex-1 bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-slate-950 font-bold uppercase tracking-widest py-3 px-6 rounded shadow transition cursor-pointer"
-              >
-                Вернуться в Штаб
-              </button>
+            <div className="pt-4 border-t border-slate-800 flex flex-col gap-3">
+              {lobby && lobby.id !== 'LOCAL_SANDBOX' ? (
+                <>
+                  <button
+                    onClick={handleReturnToLobby}
+                    className="w-full bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-[#070b0e] font-black uppercase tracking-widest py-3 px-6 rounded shadow transition cursor-pointer"
+                  >
+                    Вернуться в Лобби
+                  </button>
+                  <button
+                    onClick={handleLeaveLobby}
+                    className="w-full text-slate-400 hover:text-slate-100 hover:border-slate-500 border border-slate-800 text-xs font-mono uppercase tracking-widest py-2 px-6 rounded transition cursor-pointer"
+                  >
+                    Покинуть Лобби и Выйти
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleLeaveLobby}
+                  className="w-full bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-slate-950 font-bold uppercase tracking-widest py-3 px-6 rounded shadow transition cursor-pointer"
+                >
+                  Вернуться в Штаб
+                </button>
+              )}
             </div>
           </div>
         </div>

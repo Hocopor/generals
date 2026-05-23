@@ -17,7 +17,7 @@ export interface StartingBase {
 }
 
 export interface MapDecoration {
-  type: 'tree' | 'rock' | 'ruin_pillar' | 'bush';
+  type: 'tree' | 'rock' | 'ruin_pillar' | 'bush' | 'house';
   x: number;
   z: number;
   scale: number;
@@ -46,161 +46,210 @@ export function createSeededRandom(seed: number) {
 export function generateProceduralMap(seed: number, size: number, players: { id: string; team: number }[]): GeneratedMap {
   const rand = createSeededRandom(seed);
   
-  // 1. Initialize grid
+  // Create a 2D Value Noise Grid for continuous organic smooth terrain
+  const noiseSize = 32;
+  const noiseGrid: number[][] = [];
+  for (let i = 0; i < noiseSize; i++) {
+    noiseGrid[i] = [];
+    for (let j = 0; j < noiseSize; j++) {
+      noiseGrid[i][j] = rand();
+    }
+  }
+
+  // Smooth bilinear interpolation of the noise grid
+  function getNoise(x: number, z: number, frequency = 0.12): number {
+    const nx = (x * frequency) % (noiseSize - 1);
+    const nz = (z * frequency) % (noiseSize - 1);
+    
+    const x0 = Math.floor(nx);
+    const x1 = x0 + 1;
+    const z0 = Math.floor(nz);
+    const z1 = z0 + 1;
+    
+    const tx = nx - x0;
+    const tz = nz - z0;
+    
+    // Smoothstep formulation
+    const sx = tx * tx * (3 - 2 * tx);
+    const sz = tz * tz * (3 - 2 * tz);
+    
+    const v00 = noiseGrid[x0][z0];
+    const v10 = noiseGrid[x1][z0];
+    const v01 = noiseGrid[x0][z1];
+    const v11 = noiseGrid[x1][z1];
+    
+    const top = v00 + sx * (v10 - v00);
+    const bot = v01 + sx * (v11 - v01);
+    
+    return top + sz * (bot - top);
+  }
+
+  // Fractional Brownian Motion (Multi-frequency noise helper)
+  function fbm(x: number, z: number, octaves = 3): number {
+    let value = 0;
+    let amplitude = 1.0;
+    let freq = 0.08;
+    let maxVal = 0;
+    for (let i = 0; i < octaves; i++) {
+      value += amplitude * getNoise(x, z, freq);
+      maxVal += amplitude;
+      amplitude *= 0.5;
+      freq *= 2.0;
+    }
+    return value / maxVal;
+  }
+
+  // 1. Initialize grid with basic continuous waving heights
   const nodes: MapNode[][] = [];
   for (let x = 0; x < size; x++) {
     nodes[x] = [];
     for (let z = 0; z < size; z++) {
+      // Gentle slope fluctuations on the base plain (0.0 to 0.25)
+      const plainSway = fbm(x, z, 2) * 0.25;
+
       nodes[x][z] = {
         x,
         z,
-        height: 0,
+        height: plainSway,
         type: 'plain',
         resourceSpot: false
       };
     }
   }
 
-  // 2. Generate natural terrain features (Hills and Ridges)
-  // We place radial clumps of hills deterministically
-  const numHillClumps = Math.floor(size / 6);
-  for (let i = 0; i < numHillClumps; i++) {
-    const cx = Math.floor(rand() * (size - 10)) + 5;
-    const cz = Math.floor(rand() * (size - 10)) + 5;
-    const radius = Math.floor(rand() * 6) + 4;
-    const peakHeight = rand() > 0.4 ? 1 : 2;
-
-    for (let x = Math.max(0, cx - radius); x < Math.min(size, cx + radius); x++) {
-      for (let z = Math.max(0, cz - radius); z < Math.min(size, cz + radius); z++) {
-        const dx = x - cx;
-        const dz = z - cz;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        
-        if (dist < radius) {
-          const factor = 1 - (dist / radius);
-          const node = nodes[x][z];
-          if (factor > 0.45) {
-            node.height = peakHeight;
-            node.type = peakHeight === 2 ? 'ridge' : 'hill';
-          } else if (dist < radius && node.height === 0) {
-            node.height = 1;
-            node.type = 'hill';
-          }
-        }
+  // 2. Generate natural terrain (Hills and Ridges) using smooth 2D Noise
+  for (let x = 0; x < size; x++) {
+    for (let z = 0; z < size; z++) {
+      // Main hill noise frequency
+      const elevationNoise = fbm(x + 125, z + 267, 3);
+      
+      // Filter the noise to construct isolated, smooth highlands and mountains
+      if (elevationNoise > 0.62) {
+        // High strategic ridges/cliffs
+        const factor = (elevationNoise - 0.62) / (1 - 0.62);
+        // Elevate smoothly up to 2.0
+        nodes[x][z].height = 0.95 + factor * 1.05;
+        nodes[x][z].type = 'ridge';
+      } else if (elevationNoise > 0.44) {
+        // Gentle traversable hills
+        const factor = (elevationNoise - 0.44) / (0.62 - 0.44);
+        nodes[x][z].height = 0.25 + factor * 0.70;
+        nodes[x][z].type = 'hill';
       }
     }
   }
 
-  // 3. Generate a primary diagonal or center-crossing river/rift
-  // To divide the map and force tactical bottle-necks (bridges!)
-  const riverType = rand() > 0.5 ? 'horizontal' : 'diagonal';
-  const riverWidth = 3;
+  // 3. Generate a winding, realistic river dividing the battleground
+  // Choose horizontal or vertical river flows
+  const riverIsHorizontal = fbm(seed, seed) > 0.5;
+  const riverWidth = 3.5;
+  const bridgeWidth = 4.0; // wider bridges for easier tank crossings
 
-  if (riverType === 'horizontal') {
-    const rz = Math.floor(size / 2);
-    // Draw river
+  // List of bridges to place along the flow
+  const bridgePositions = [Math.floor(size * 0.28), Math.floor(size * 0.72)];
+
+  if (riverIsHorizontal) {
+    const midZ = size / 2;
     for (let x = 0; x < size; x++) {
-      // Small sine wave sway on the river
-      const sway = Math.floor(Math.sin(x * 0.15) * 2);
-      const tz = rz + sway;
-      for (let w = -Math.floor(riverWidth/2); w <= Math.floor(riverWidth/2); w++) {
-        const targetZ = tz + w;
-        if (targetZ >= 0 && targetZ < size) {
-          nodes[x][targetZ].height = -1;
-          nodes[x][targetZ].type = 'water';
-        }
-      }
-    }
-
-    // Place 2 bridges across the river for ground columns to advance
-    const bridgeX1 = Math.floor(size * 0.25);
-    const bridgeX2 = Math.floor(size * 0.75);
-    const bridges = [bridgeX1, bridgeX2];
-
-    for (const bx of bridges) {
-      const sway = Math.floor(Math.sin(bx * 0.15) * 2);
-      const tz = rz + sway;
-      for (let w = -3; w <= 3; w++) {
-        const targetZ = tz + w;
-        if (targetZ >= 0 && targetZ < size) {
-          const node = nodes[bx][targetZ];
-          node.height = 0;
-          node.type = 'bridge';
-        }
-        // Also bridges should have a left-right support border
-        for (let dw = -1; dw <= 1; dw++) {
-          if (bx + dw >= 0 && bx + dw < size && targetZ >= 0 && targetZ < size) {
-            const node = nodes[bx + dw][targetZ];
-            node.height = 0;
-            node.type = 'bridge';
+      // Smooth sinusoidal snake wave + noise sway
+      const riverCenterZ = midZ + Math.sin(x * 0.12) * 7 + getNoise(x, 100, 0.05) * 5;
+      
+      for (let z = 0; z < size; z++) {
+        const distToCenter = Math.abs(z - riverCenterZ);
+        
+        if (distToCenter < riverWidth) {
+          // Check if this column is a bridge site
+          const isAtBridge = bridgePositions.some(bp => Math.abs(x - bp) < bridgeWidth);
+          
+          if (isAtBridge) {
+            // Flatten roads and approaches on bridges
+            nodes[x][z].height = 0.0;
+            nodes[x][z].type = 'bridge';
+          } else {
+            // Smoothly carve the river profile (deepest in the center)
+            const depthFactor = 1.0 - (distToCenter / riverWidth); // 0 at shoreline, 1 in center
+            const finalDepth = -0.8 * (depthFactor * depthFactor); // parabolic bed
+            
+            nodes[x][z].height = finalDepth;
+            nodes[x][z].type = 'water';
           }
+        } else if (distToCenter < riverWidth + 3.0) {
+          // Smooth sand shoulder transition (shoreline beach)
+          const shoreFactor = (distToCenter - riverWidth) / 3.0; // 0 to 1
+          const targetH = nodes[x][z].height;
+          // Smoothly raise from river bed side to normal ground height!
+          nodes[x][z].height = -0.4 * (1.0 - shoreFactor) + targetH * shoreFactor;
         }
       }
     }
   } else {
-    // Diagonal river
-    for (let x = 0; x < size; x++) {
-      const targetZ = x;
-      for (let w = -Math.floor(riverWidth/2); w <= Math.floor(riverWidth/2); w++) {
-        const tz = targetZ + w;
-        if (tz >= 0 && tz < size) {
-          nodes[x][tz].height = -1;
-          nodes[x][tz].type = 'water';
-        }
-      }
-    }
-
-    // Diagonal bridges: one around quarter-map, another around 3-quarters
-    const bridgeOffsets = [Math.floor(size * 0.3), Math.floor(size * 0.7)];
-    for (const bo of bridgeOffsets) {
-      for (let w = -3; w <= 3; w++) {
-        const xCoord = bo + w;
-        const zCoord = bo - w; // Perpendicular bridge cross
-        if (xCoord >= 0 && xCoord < size && zCoord >= 0 && zCoord < size) {
-          nodes[xCoord][zCoord].height = 0;
-          nodes[xCoord][zCoord].type = 'bridge';
-        }
-        // Make it wider
-        if (xCoord + 1 < size && zCoord >= 0 && zCoord < size) {
-          nodes[xCoord + 1][zCoord].height = 0;
-          nodes[xCoord + 1][zCoord].type = 'bridge';
+    // Vertical river flow
+    const midX = size / 2;
+    for (let z = 0; z < size; z++) {
+      const riverCenterX = midX + Math.sin(z * 0.12) * 7 + getNoise(100, z, 0.05) * 5;
+      
+      for (let x = 0; x < size; x++) {
+        const distToCenter = Math.abs(x - riverCenterX);
+        
+        if (distToCenter < riverWidth) {
+          const isAtBridge = bridgePositions.some(bp => Math.abs(z - bp) < bridgeWidth);
+          
+          if (isAtBridge) {
+            nodes[x][z].height = 0.0;
+            nodes[x][z].type = 'bridge';
+          } else {
+            const depthFactor = 1.0 - (distToCenter / riverWidth);
+            const finalDepth = -0.8 * (depthFactor * depthFactor);
+            
+            nodes[x][z].height = finalDepth;
+            nodes[x][z].type = 'water';
+          }
+        } else if (distToCenter < riverWidth + 3.0) {
+          const shoreFactor = (distToCenter - riverWidth) / 3.0;
+          const targetH = nodes[x][z].height;
+          nodes[x][z].height = -0.4 * (1.0 - shoreFactor) + targetH * shoreFactor;
         }
       }
     }
   }
 
-  // 4. Calculate starting bases symmetrically (evenly distributed in radius from center)
+  // 4. Calculate starting base spawns and flatten/clear surrounding terrain
   const startingBases: StartingBase[] = [];
   const cx = size / 2;
   const cz = size / 2;
-  const spawnRadius = size * 0.36; // Place them at ~36% out, safe from outer borders
+  const spawnRadius = size * 0.36;
 
   players.forEach((player, idx) => {
-    // Evenly divide the angle
     const totalPlayers = players.length;
-    const angle = (idx * 2 * Math.PI) / totalPlayers + Math.PI / 4; // Add slight tilt
+    const spawnAngle = (idx * 2 * Math.PI) / totalPlayers + Math.PI / 4;
 
-    let sx = Math.floor(cx + Math.cos(angle) * spawnRadius);
-    let sz = Math.floor(cz + Math.sin(angle) * spawnRadius);
+    let sx = Math.floor(cx + Math.cos(spawnAngle) * spawnRadius);
+    let sz = Math.floor(cz + Math.sin(spawnAngle) * spawnRadius);
 
-    // Safeguard spawn boundaries
-    sx = Math.max(5, Math.min(size - 6, sx));
-    sz = Math.max(5, Math.min(size - 6, sz));
+    sx = Math.max(7, Math.min(size - 8, sx));
+    sz = Math.max(7, Math.min(size - 8, sz));
 
-    // Clear nearby river/water at base spawning ground to avoid getting stuck in river!
-    for (let dx = -4; dx <= 4; dx++) {
-      for (let dz = -4; dz <= 4; dz++) {
+    // Flatten bases inside an 8x8 radius to guarantee easy base building layout
+    for (let dx = -5; dx <= 5; dx++) {
+      for (let dz = -5; dz <= 5; dz++) {
         const tx = sx + dx;
         const tz = sz + dz;
+        
         if (tx >= 0 && tx < size && tz >= 0 && tz < size) {
           const node = nodes[tx][tz];
-          if (node.type === 'water') {
-            node.height = 0;
-            node.type = 'bridge'; // Becomes playable field
-          } else {
-            // Flatten base area slightly
-            node.height = 0;
+          const distFromBase = Math.sqrt(dx * dx + dz * dz);
+          
+          if (distFromBase < 5.0) {
+            // Flatten completely
+            node.height = 0.0;
             node.type = 'plain';
+          } else if (distFromBase < 6.5) {
+            // Smooth transition outline
+            const factor = (distFromBase - 5.0) / 1.5;
+            node.height = node.height * factor;
+            if (node.type === 'water') {
+              node.type = 'plain';
+            }
           }
         }
       }
@@ -214,101 +263,165 @@ export function generateProceduralMap(seed: number, size: number, players: { id:
     });
   });
 
-  // 5. Spawn strategic resource oil oil-wells / supply derrick sites
-  // We place them in areas far from direct spawning bases (e.g. center, flanking corridors)
+  // 5. Spawn strategic supply oil derricks / gold spots
   const resourceSpots: { x: number; z: number }[] = [];
-  const activeCount = players.length;
-  // Place strategic spots: one exactly in the center, and 2 to 4 in remaining regions
-  const spotsToPlace = Math.min(8, activeCount * 2);
+  const spotsToPlace = Math.min(8, players.length * 2 + 1);
 
-  // Always try center spot
+  // Center strategic derrick
   const centerNodeX = Math.floor(size / 2);
   const centerNodeZ = Math.floor(size / 2);
-  if (nodes[centerNodeX] && nodes[centerNodeX][centerNodeZ]) {
-    nodes[centerNodeX][centerNodeZ].resourceSpot = true;
-    nodes[centerNodeX][centerNodeZ].height = 0; // Flatten
-    nodes[centerNodeX][centerNodeZ].type = 'plain';
+  let centerNode = nodes[centerNodeX]?.[centerNodeZ];
+  if (centerNode) {
+    centerNode.resourceSpot = true;
+    centerNode.height = 0.0;
+    centerNode.type = 'plain';
     resourceSpots.push({ x: centerNodeX, z: centerNodeZ });
   }
 
-  // Rest placed semi-randomly but balanced relative to center
-  let attempts = 0;
-  while (resourceSpots.length < spotsToPlace && attempts < 100) {
-    attempts++;
+  // Flanker and center-perpendicular corridors
+  let resourceAttempts = 0;
+  while (resourceSpots.length < spotsToPlace && resourceAttempts < 150) {
+    resourceAttempts++;
     const rx = Math.floor(rand() * (size - 16)) + 8;
     const rz = Math.floor(rand() * (size - 16)) + 8;
 
-    // Check distance to base coords (can't be right in someone's core spawn base)
     let tooClose = false;
+
+    // Check starting bases
     for (const base of startingBases) {
       const distSq = (rx - base.x) * (rx - base.x) + (rz - base.z) * (rz - base.z);
-      if (distSq < 15 * 15) { // At least 15 units away from spawns
+      if (distSq < 16 * 16) {
         tooClose = true;
         break;
       }
     }
 
-    // Check distance to existing resources
+    // Check existing spots
     for (const spot of resourceSpots) {
       const distSq = (rx - spot.x) * (rx - spot.x) + (rz - spot.z) * (rz - spot.z);
-      if (distSq < 12 * 12) { // At least 12 units apart
+      if (distSq < 13 * 13) {
         tooClose = true;
         break;
       }
     }
 
-    // Can't be in deep water unless we flatten it
-    if (!tooClose) {
-      nodes[rx][rz].resourceSpot = true;
-      nodes[rx][rz].height = 0;
-      nodes[rx][rz].type = 'plain';
-      resourceSpots.push({ x: rx, z: rz });
+    // Must be flat buildable lands
+    if (!tooClose && nodes[rx] && nodes[rx][rz]) {
+      const node = nodes[rx][rz];
+      if (node.type !== 'water' && node.type !== 'bridge') {
+        node.resourceSpot = true;
+        node.height = 0.0; // Flatten resources for refinery placement
+        node.type = 'plain';
+        resourceSpots.push({ x: rx, z: rz });
+      }
     }
   }
 
-  // 6. Natural procedural map decorations (trees, bushes, rocks, pillars)
+  // 6. Natural decorations (forest dense clumps, rock piles, ruins, and villages!)
   const decorations: MapDecoration[] = [];
-  const numDecs = Math.floor(size * 1.5);
-  for (let i = 0; i < numDecs; i++) {
-    const rx = Math.floor(rand() * (size - 2)) + 1;
-    const rz = Math.floor(rand() * (size - 2)) + 1;
 
-    if (nodes[rx] === undefined || nodes[rx][rz] === undefined) continue;
-    const node = nodes[rx][rz];
+  // Generate 2 or 3 tiny rustic "Villages" in comfortable neutral regions
+  const numVillages = 3;
+  const villageCoords: { x: number; z: number }[] = [];
+  let villAttempts = 0;
+  while (villageCoords.length < numVillages && villAttempts < 80) {
+    villAttempts++;
+    const vx = Math.floor(rand() * (size - 24)) + 12;
+    const vz = Math.floor(rand() * (size - 24)) + 12;
 
-    // Avoid water (keep ground path navigable) and avoid bridges or resource spots
-    if (node.type === 'water' || node.type === 'bridge' || node.resourceSpot) continue;
-
-    // Avoid spawning too close to any starting spawn base
-    let nearSpawn = false;
+    let ok = true;
     for (const base of startingBases) {
-      const distSq = (rx - base.x) * (rx - base.x) + (rz - base.z) * (rz - base.z);
-      if (distSq < 7 * 7) { // 7 tiles safety clear zone around HQs
-        nearSpawn = true;
-        break;
+      const d = Math.sqrt((vx - base.x) ** 2 + (vz - base.z) ** 2);
+      if (d < 18) ok = false;
+    }
+    for (const res of resourceSpots) {
+      const d = Math.sqrt((vx - res.x) ** 2 + (vz - res.z) ** 2);
+      if (d < 12) ok = false;
+    }
+    
+    const node = nodes[vx]?.[vz];
+    if (node && node.type !== 'plain') ok = false;
+
+    if (ok) {
+      villageCoords.push({ x: vx, z: vz });
+      
+      // Spawn 3 to 6 cosy houses closely spaced inside the village center!
+      const buildingsInVillage = Math.floor(rand() * 4) + 3;
+      for (let h = 0; h < buildingsInVillage; h++) {
+        const hx = vx + (rand() - 0.5) * 3.5;
+        const hz = vz + (rand() - 0.5) * 3.5;
+        
+        const hNode = nodes[Math.round(hx)]?.[Math.round(hz)];
+        if (hNode && hNode.type === 'plain' && !hNode.resourceSpot) {
+          decorations.push({
+            type: 'house',
+            x: hx,
+            z: hz,
+            scale: rand() * 0.12 + 0.88,
+            rotation: rand() * Math.PI * 2
+          });
+          
+          // Flatten cottage ground slightly
+          hNode.height = Math.max(0.0, hNode.height * 0.5);
+        }
       }
     }
-    if (nearSpawn) continue;
+  }
 
-    const roll = rand();
-    let type: 'tree' | 'rock' | 'ruin_pillar' | 'bush';
-    if (roll < 0.45) {
-      type = 'tree';
-    } else if (roll < 0.70) {
-      type = 'bush';
-    } else if (roll < 0.88) {
-      type = 'rock';
-    } else {
-      type = 'ruin_pillar';
+  // Distribute forest clusters, bushes, rock clusters
+  const numDecClumps = Math.floor(size / 3.2);
+  for (let c = 0; c < numDecClumps; c++) {
+    const cx = Math.floor(rand() * (size - 6)) + 3;
+    const cz = Math.floor(rand() * (size - 6)) + 3;
+    
+    // Choose clump type
+    const clumpType = rand() > 0.4 ? 'forest' : 'rocks';
+    const clumpSize = Math.floor(rand() * 4) + 3;
+
+    for (let d = 0; d < clumpSize; d++) {
+      // Offset slightly from clump center
+      const theta = rand() * Math.PI * 2;
+      const radius = rand() * 3.0;
+      const rx = Math.round(cx + Math.cos(theta) * radius);
+      const rz = Math.round(cz + Math.sin(theta) * radius);
+
+      if (nodes[rx] === undefined || nodes[rx][rz] === undefined) continue;
+      const node = nodes[rx][rz];
+
+      // Blocked on water, bridges or active base HQ points
+      if (node.type === 'water' || node.type === 'bridge' || node.resourceSpot) continue;
+
+      let nearSpawn = false;
+      for (const base of startingBases) {
+        const dSq = (rx - base.x) ** 2 + (rz - base.z) ** 2;
+        if (dSq < 8 * 8) {
+          nearSpawn = true;
+          break;
+        }
+      }
+      if (nearSpawn) continue;
+
+      const scale = rand() * 0.4 + 0.8;
+      const rotation = rand() * Math.PI * 2;
+
+      if (clumpType === 'forest') {
+        decorations.push({
+          type: rand() > 0.3 ? 'tree' : 'bush',
+          x: rx + (rand() - 0.5) * 0.3,
+          z: rz + (rand() - 0.5) * 0.3,
+          scale,
+          rotation
+        });
+      } else {
+        decorations.push({
+          type: rand() > 0.35 ? 'rock' : 'ruin_pillar',
+          x: rx + (rand() - 0.5) * 0.3,
+          z: rz + (rand() - 0.5) * 0.3,
+          scale,
+          rotation
+        });
+      }
     }
-
-    decorations.push({
-      type,
-      x: rx + (rand() - 0.5) * 0.4,
-      z: rz + (rand() - 0.5) * 0.4,
-      scale: rand() * 0.5 + 0.75,
-      rotation: rand() * Math.PI * 2
-    });
   }
 
   return {

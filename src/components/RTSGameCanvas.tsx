@@ -43,10 +43,10 @@ function getTerrainHeight(x: number, z: number, map: GeneratedMap): number {
   const x2 = Math.ceil(x);
   const z2 = Math.ceil(z);
   
-  const h11 = (map.nodes[x1] && map.nodes[x1][z1]) ? map.nodes[x1][z1].height * 1.5 : 0;
-  const h21 = (map.nodes[x2] && map.nodes[x2][z1]) ? map.nodes[x2][z1].height * 1.5 : 0;
-  const h12 = (map.nodes[x1] && map.nodes[x1][z2]) ? map.nodes[x1][z2].height * 1.5 : 0;
-  const h22 = (map.nodes[x2] && map.nodes[x2][z2]) ? map.nodes[x2][z2].height * 1.5 : 0;
+  const h11 = (map.nodes[x1] && map.nodes[x1][z1]) ? map.nodes[x1][z1].height * 1.6 : 0;
+  const h21 = (map.nodes[x2] && map.nodes[x2][z1]) ? map.nodes[x2][z1].height * 1.6 : 0;
+  const h12 = (map.nodes[x1] && map.nodes[x1][z2]) ? map.nodes[x1][z2].height * 1.6 : 0;
+  const h22 = (map.nodes[x2] && map.nodes[x2][z2]) ? map.nodes[x2][z2].height * 1.6 : 0;
   
   const tx = x - x1;
   const tz = z - z1;
@@ -381,45 +381,103 @@ export default function RTSGameCanvas({
     // Offset terrain offset to match 3D center
     terrainGeo.translate(gridS / 2, 0, gridS / 2);
 
-    // Set vertex heights matching map nodes
+    // Set vertex heights matching map nodes and apply gorgeous realistic vertex colors
     const posAttr = terrainGeo.attributes.position;
-    for (let x = 0; x < gridS; x++) {
-      for (let z = 0; z < gridS; z++) {
-        const heightVal = map.nodes[x][z].height;
-        // Vertices are ordered differently, but we search matching index
-        for (let i = 0; i < posAttr.count; i++) {
-          const vx = posAttr.getX(i);
-          const vz = posAttr.getZ(i);
-          if (Math.abs(vx - x) < 0.1 && Math.abs(vz - z) < 0.1) {
-            // Apply a nice elevation factor
-            posAttr.setY(i, heightVal * 1.5);
-          }
+    const colorsArray = new Float32Array(posAttr.count * 3);
+
+    for (let i = 0; i < posAttr.count; i++) {
+      const vx = posAttr.getX(i);
+      const vz = posAttr.getZ(i);
+      
+      const xIndex = Math.max(0, Math.min(gridS - 1, Math.round(vx)));
+      const zIndex = Math.max(0, Math.min(gridS - 1, Math.round(vz)));
+      
+      const node = map.nodes[xIndex]?.[zIndex] || map.nodes[0][0];
+      const heightVal = node.height;
+      
+      // Apply smooth organic height factor
+      posAttr.setY(i, heightVal * 1.6);
+      
+      // Professional color palettes matching real environment ecosystems
+      let r = 40/255, g = 71/255, b = 37/255; // forest green default
+      
+      if (node.type === 'water') {
+        // Beach shorelines / silt sand
+        r = 115/255; g = 101/255; b = 77/255;
+      } else if (node.type === 'bridge') {
+        // Reinforced concrete crossing gray
+        r = 85/255; g = 89/255; b = 92/255;
+      } else if (node.type === 'ridge') {
+        // Rugged mountains to snowy peaks
+        if (heightVal > 1.6) {
+          r = 210/255; g = 215/255; b = 220/255; // snow glacier white
+        } else {
+          r = 95/255; g = 100/255; b = 105/255; // craggy steep granite
+        }
+      } else if (node.type === 'hill') {
+        // Mud clay slopes
+        r = 101/255; g = 84/255; b = 64/255;
+      } else {
+        // Plain grassfields: include custom coordinates-based variations
+        const sway = Math.sin(xIndex * 0.455) * Math.cos(zIndex * 0.455);
+        if (sway > 0.4) {
+          r = 28/255; g = 54/255; b = 24/255; // dark mossy shade
+        } else if (sway < -0.4) {
+          r = 65/255; g = 92/255; b = 58/255; // lighter summer dry crop turf
+        } else {
+          r = 40/255; g = 71/255; b = 37/255; // military standard green
+        }
+        
+        // Oil dirt rings near resource spots
+        if (node.resourceSpot) {
+          r = 26/255; g = 21/255; b = 18/255; // petroleum smudge soil
         }
       }
+      
+      colorsArray[i * 3] = r;
+      colorsArray[i * 3 + 1] = g;
+      colorsArray[i * 3 + 2] = b;
     }
+
+    terrainGeo.setAttribute('color', new THREE.BufferAttribute(colorsArray, 3));
     terrainGeo.computeVertexNormals();
 
-    // Material matching sleek grid shader look without heavy outside patterns
+    // Material matching smooth organic terrain shading
     const terrainMat = new THREE.MeshStandardMaterial({
-      color: '#1a222c',
-      roughness: 0.8,
-      metalness: 0.1,
-      flatShading: true,
-      vertexColors: false
+      vertexColors: true,
+      roughness: 0.9,
+      metalness: 0.05,
+      flatShading: false // Smooth curves!
     });
 
     const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
     terrainMesh.receiveShadow = true;
     scene.add(terrainMesh);
 
+    // Glistening navy-blue transparent water plane fills river channels nicely
+    const waterGeo = new THREE.PlaneGeometry(gridS, gridS);
+    waterGeo.rotateX(-Math.PI / 2);
+    waterGeo.translate(gridS / 2, -0.22, gridS / 2); // Sea depth below dry areas
+
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: '#0e3a60',
+      transparent: true,
+      opacity: 0.72,
+      roughness: 0.12,
+      metalness: 0.88,
+      flatShading: false
+    });
+    const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+    scene.add(waterMesh);
+
     // Add a modern wireframe grid sitting slightly above terrain to trace heights
     const wireGeo = terrainGeo.clone();
     wireGeo.translate(0, 0.02, 0); // lift slightly
     const wireMat = new THREE.MeshBasicMaterial({
-      color: '#0891b2',
+      color: '#22d3ee',
       wireframe: true,
       transparent: true,
-      opacity: 0.15
+      opacity: 0.045 // ultra-subtle coordinate lines
     });
     const wireMesh = new THREE.Mesh(wireGeo, wireMat);
     scene.add(wireMesh);
@@ -518,6 +576,32 @@ export default function RTSGameCanvas({
           pillar.rotation.x = Math.sin(idx) * 0.15;
           pillar.castShadow = true;
           decGroup.add(pillar);
+        } else if (dec.type === 'house') {
+          // Rural house building base
+          const cottageGeo = new THREE.BoxGeometry(0.85 * dec.scale, 0.6 * dec.scale, 0.85 * dec.scale);
+          const cottageMat = new THREE.MeshStandardMaterial({ color: '#d1d5db', roughness: 0.85 }); // light plaster walls
+          const cottage = new THREE.Mesh(cottageGeo, cottageMat);
+          cottage.position.y = 0.3 * dec.scale;
+          cottage.castShadow = true;
+          cottage.receiveShadow = true;
+          decGroup.add(cottage);
+
+          // Gable roof (Triangular Prism modeled with Cone)
+          const roofGeo = new THREE.ConeGeometry(0.72 * dec.scale, 0.5 * dec.scale, 4);
+          const roofMat = new THREE.MeshStandardMaterial({ color: '#b91c1c', roughness: 0.75, flatShading: true }); // terracotta red roof
+          const roof = new THREE.Mesh(roofGeo, roofMat);
+          roof.position.y = (0.6 + 0.25) * dec.scale;
+          roof.rotation.y = Math.PI / 4; // align cone sides to house base
+          roof.castShadow = true;
+          decGroup.add(roof);
+
+          // Small chimney cylinder
+          const chimneyGeo = new THREE.CylinderGeometry(0.06 * dec.scale, 0.06 * dec.scale, 0.3 * dec.scale, 4);
+          const chimneyMat = new THREE.MeshStandardMaterial({ color: '#4b5563', roughness: 0.9 });
+          const chimney = new THREE.Mesh(chimneyGeo, chimneyMat);
+          chimney.position.set(-0.2 * dec.scale, 0.75 * dec.scale, 0.1 * dec.scale);
+          chimney.castShadow = true;
+          decGroup.add(chimney);
         }
 
         scene.add(decGroup);
@@ -1372,6 +1456,23 @@ export default function RTSGameCanvas({
           entityMeshes.set(ent.id, mesh);
         }
 
+        // CRITICAL GROUND CLAMP PROTOCOL: Lock 3D physical position to terrain heights on every frame tick!
+        // Guarantees all vehicles, infantry, and structures glide over slopes correctly without sinking.
+        const currentElevation = getTerrainHeight(ent.x, ent.z, map);
+        const isDrone = ent.type === 'unit' && ent.subType.includes('drone');
+        
+        let visualY = currentElevation + 0.05;
+        if (isDrone) {
+          visualY = 3.0; // quadcopter drones float majestically
+        } else if (ent.type === 'building') {
+          visualY = currentElevation + 0.05;
+        }
+
+        mesh.position.set(ent.x, visualY, ent.z);
+        if (ent.type === 'unit') {
+          mesh.rotation.y = ent.angle;
+        }
+
         // Visual entity highlights for user selections
         if (sim.selectedIds.includes(ent.id)) {
           let ring = activeSelectionRings.get(ent.id);
@@ -1585,8 +1686,6 @@ export default function RTSGameCanvas({
 
                 if (pType === 'machinegun') {
                   sound.playGunshot();
-                } else if (pType === 'laser') {
-                  sound.playLaser();
                 } else {
                   sound.playLaunch();
                 }

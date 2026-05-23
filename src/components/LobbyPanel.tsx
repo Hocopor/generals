@@ -82,6 +82,9 @@ export default function LobbyPanel({
   const [chatText, setChatText] = useState('');
   const [isCopied, setIsCopied] = useState(false);
 
+  const uniqueTeams = lobby ? new Set(lobby.players.map(p => p.team)) : new Set();
+  const allOnSameTeam = lobby ? (lobby.players.length > 1 && uniqueTeams.size <= 1) : false;
+
   useEffect(() => {
     localStorage.setItem('cnc_playerName', playerName);
   }, [playerName]);
@@ -348,6 +351,15 @@ export default function LobbyPanel({
               </div>
 
               {/* Lobby Control Action footer */}
+              {allOnSameTeam && (
+                <div className="mt-4 bg-rose-950/40 border border-rose-800/60 p-4 rounded-lg flex flex-col sm:flex-row items-center gap-3 text-rose-300">
+                  <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+                  <p className="text-xs font-mono">
+                    <strong className="text-rose-200">БЛОКИРОВКА ЗАПУСКА:</strong> Все командиры выбрали одинаковую команду! Смените номер команды, чтобы распределиться по противоборствующим сторонам.
+                  </p>
+                </div>
+              )}
+
               <div className="mt-8 border-t border-slate-800 pt-6 flex flex-col sm:flex-row gap-4 items-center justify-between">
                 <button
                   onClick={onLeaveLobby}
@@ -363,8 +375,8 @@ export default function LobbyPanel({
                         sound.playLaunch();
                         onStartMultiplayerGame();
                       }}
-                      disabled={lobby.players.length < 1}
-                      className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-500 font-bold uppercase tracking-widest text-[#070b0e] py-3 px-8 rounded shadow-lg shadow-cyan-950/20 transition cursor-pointer"
+                      disabled={lobby.players.length < 1 || allOnSameTeam}
+                      className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-505 disabled:hover:scale-100 font-bold uppercase tracking-widest text-[#070b0e] py-3 px-8 rounded shadow-lg shadow-cyan-950/20 transition cursor-pointer"
                     >
                       НАЧАТЬ ВОЕННУЮ КАМПАНИЮ
                     </button>
@@ -375,7 +387,8 @@ export default function LobbyPanel({
                         onUpdatePlayer(selectedFaction, selectedTeam, nextReady);
                         sound.playClick();
                       }}
-                      className={`w-full sm:w-auto font-bold uppercase tracking-widest py-3 px-8 rounded shadow-lg transition cursor-pointer ${
+                      disabled={allOnSameTeam && !selfPlayer?.isReady}
+                      className={`w-full sm:w-auto font-bold uppercase tracking-widest py-3 px-8 rounded shadow-lg transition cursor-pointer disabled:bg-slate-800 disabled:text-slate-550 ${
                         selfPlayer?.isReady 
                           ? 'bg-slate-800 text-slate-350 hover:bg-slate-700' 
                           : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950'
@@ -392,7 +405,8 @@ export default function LobbyPanel({
                       onUpdatePlayer(selectedFaction, selectedTeam, nextReady);
                       sound.playClick();
                     }}
-                    className={`w-full sm:w-auto font-bold uppercase tracking-widest py-3 px-8 rounded border shadow-lg transition cursor-pointer ${
+                    disabled={allOnSameTeam && !selfPlayer?.isReady}
+                    className={`w-full sm:w-auto font-bold uppercase tracking-widest py-3 px-8 rounded border shadow-lg transition cursor-pointer disabled:bg-slate-800 disabled:text-slate-550 disabled:border-slate-850 ${
                       selfPlayer?.isReady 
                         ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-400' 
                         : 'bg-cyan-500 border-cyan-400 text-slate-950 hover:bg-cyan-400'
