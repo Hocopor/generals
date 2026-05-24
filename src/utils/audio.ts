@@ -605,6 +605,101 @@ class RTSAudioEngine {
     thump.start();
     thump.stop(ctx.currentTime + 0.1);
   }
+
+  playAllianceZap() {
+    if (!this.enabled) return;
+    this.initCtx();
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(1500, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.1);
+    
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.1);
+  }
+
+  playCoalitionBoom() {
+    if (!this.enabled) return;
+    this.initCtx();
+    const ctx = this.ctx!;
+    
+    const sub = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    sub.type = "sawtooth";
+    sub.frequency.setValueAtTime(140, ctx.currentTime);
+    sub.frequency.exponentialRampToValueAtTime(35, ctx.currentTime + 0.2);
+    
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(400, ctx.currentTime);
+    
+    subGain.gain.setValueAtTime(0.6, ctx.currentTime);
+    subGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+    
+    sub.connect(filter).connect(subGain).connect(ctx.destination);
+    sub.start();
+    sub.stop(ctx.currentTime + 0.22);
+  }
+
+  playUnionTesla() {
+    if (!this.enabled) return;
+    this.initCtx();
+    const ctx = this.ctx!;
+    
+    for (let i = 0; i < 3; i++) {
+      const offset = i * 0.03;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(800 + Math.random() * 600, ctx.currentTime + offset);
+      osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + offset + 0.05);
+      
+      gain.gain.setValueAtTime(0.15, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.05);
+      
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.05);
+    }
+  }
+
+  playSyndicateAcid() {
+    if (!this.enabled) return;
+    this.initCtx();
+    const ctx = this.ctx!;
+    
+    const bufferSize = Math.floor(ctx.sampleRate * 0.15);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.sin(i * 0.01) * Math.exp(-i / (ctx.sampleRate * 0.05));
+    }
+    
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+    
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(1200, ctx.currentTime);
+    filter.Q.value = 3.0;
+    
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    
+    noise.connect(filter).connect(gain).connect(ctx.destination);
+    noise.start();
+    noise.stop(ctx.currentTime + 0.15);
+  }
 }
 
 export const sound = new RTSAudioEngine();

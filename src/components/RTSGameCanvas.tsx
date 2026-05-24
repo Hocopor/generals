@@ -94,6 +94,7 @@ export default function RTSGameCanvas({
 
   // HUD and Selection options
   const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
+  const [dragSelection, setDragSelection] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [buildingToPlace, setBuildingToPlace] = useState<BuildingType | null>(null);
   const [productionQueue, setProductionQueue] = useState<{ buildingId: string; type: UnitType; progress: number }[]>([]);
   const [commandStrikeActive, setCommandStrikeActive] = useState<boolean>(false);
@@ -663,245 +664,1023 @@ export default function RTSGameCanvas({
     function constructModel(ent: GameEntity, colorHex: string): THREE.Group {
       const g = new THREE.Group();
       const pColor = new THREE.Color(colorHex);
+      const faction = getFaction(ent.playerId, sim.players);
+
+      let structuralHull = new THREE.MeshStandardMaterial({ color: '#374151', metalness: 0.8, roughness: 0.3 });
+      let glowingCore = new THREE.MeshBasicMaterial({ color: pColor });
+
+      // Apply gorgeous thematic materials based on player's Faction
+      if (faction === 'Alliance') {
+        structuralHull = new THREE.MeshStandardMaterial({ color: '#f1f5f9', metalness: 0.9, roughness: 0.1 });
+        glowingCore = new THREE.MeshBasicMaterial({ color: new THREE.Color('#38bdf8') });
+      } else if (faction === 'Coalition') {
+        structuralHull = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.7, roughness: 0.4 });
+        glowingCore = new THREE.MeshBasicMaterial({ color: new THREE.Color('#f97316') });
+      } else if (faction === 'Union') {
+        structuralHull = new THREE.MeshStandardMaterial({ color: '#854d0e', metalness: 0.8, roughness: 0.2 });
+        glowingCore = new THREE.MeshBasicMaterial({ color: new THREE.Color('#eab308') });
+      } else { // Syndicate
+        structuralHull = new THREE.MeshStandardMaterial({ color: '#1e1b4b', metalness: 0.6, roughness: 0.5 });
+        glowingCore = new THREE.MeshBasicMaterial({ color: new THREE.Color('#22c55e') });
+      }
+
+      const vehicleHull = structuralHull;
+      const dynamicCoating = new THREE.MeshStandardMaterial({ color: pColor, metalness: 0.5, roughness: 0.3 });
 
       if (ent.type === 'building') {
-        const structuralHull = new THREE.MeshStandardMaterial({ color: '#374151', metalness: 0.8, roughness: 0.3 });
-        const glowingCore = new THREE.MeshBasicMaterial({ color: pColor });
-
         if (ent.subType === 'command_center') {
-          // Large heavy base building
-          const base = new THREE.Mesh(new THREE.BoxGeometry(3.5, 1.5, 3.5), structuralHull);
-          base.position.y = 0.75;
-          base.castShadow = true;
-          base.receiveShadow = true;
-          g.add(base);
+          if (faction === 'Alliance') {
+            const b = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 1.0, 8), structuralHull);
+            b.position.y = 0.5;
+            b.castShadow = true;
+            b.receiveShadow = true;
+            g.add(b);
 
-          const core = new THREE.Mesh(new THREE.CylinderGeometry(1, 1.3, 1, 8), glowingCore);
-          core.position.y = 1.5 + 0.5;
-          g.add(core);
+            const pillar1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 0.3), structuralHull);
+            pillar1.position.set(-0.8, 1.25, -0.8);
+            g.add(pillar1);
 
-          // Radar dish antenna
-          const radMount = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.7), structuralHull);
-          radMount.position.set(1.2, 1.5, 1.2);
-          g.add(radMount);
+            const pillar2 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 0.3), structuralHull);
+            pillar2.position.set(0.8, 1.25, 0.8);
+            g.add(pillar2);
 
-          const radarDish = new THREE.Mesh(new THREE.ConeGeometry(0.8, 0.4, 8), glowingCore);
-          radarDish.rotation.z = Math.PI / 4;
-          radarDish.position.set(1.2, 1.9, 1.2);
-          radarDish.name = 'radar_dish'; // can animate spinning
-          g.add(radarDish);
+            const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 12), glowingCore);
+            sphere.position.y = 1.9;
+            g.add(sphere);
+
+            const antenna = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.25, 8), glowingCore);
+            antenna.rotation.z = Math.PI / 4;
+            antenna.position.set(0.8, 1.0, -0.8);
+            antenna.name = 'radar_dish';
+            g.add(antenna);
+
+          } else if (faction === 'Coalition') {
+            const base = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.1, 0.8, 6), structuralHull);
+            base.position.y = 0.4;
+            base.castShadow = true;
+            base.receiveShadow = true;
+            g.add(base);
+
+            const controlRoom = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.6, 1.4), structuralHull);
+            controlRoom.position.y = 1.1;
+            g.add(controlRoom);
+
+            const glowBand = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.08, 1.45), glowingCore);
+            glowBand.position.y = 1.1;
+            g.add(glowBand);
+
+            const plate = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.1, 1.7), structuralHull);
+            plate.position.y = 1.45;
+            g.add(plate);
+
+            const antennaSupport = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.5), structuralHull);
+            antennaSupport.position.set(0.7, 1.1, 0.7);
+            g.add(antennaSupport);
+
+            const satDish = new THREE.Mesh(new THREE.ConeGeometry(0.6, 0.3, 8), glowingCore);
+            satDish.rotation.z = Math.PI / 3;
+            satDish.position.set(0.7, 1.4, 0.7);
+            satDish.name = 'radar_dish';
+            g.add(satDish);
+
+          } else if (faction === 'Union') {
+            const towerBase = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.4, 2.6), structuralHull);
+            towerBase.position.y = 0.7;
+            towerBase.castShadow = true;
+            towerBase.receiveShadow = true;
+            g.add(towerBase);
+
+            const pillarCorner1 = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 1.8), structuralHull);
+            pillarCorner1.position.set(-1.1, 0.9, -1.1);
+            g.add(pillarCorner1);
+
+            const pillarCorner2 = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 1.8), structuralHull);
+            pillarCorner2.position.set(1.1, 0.9, 1.1);
+            g.add(pillarCorner2);
+
+            const centralCoil = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.9, 8), glowingCore);
+            centralCoil.position.y = 1.85;
+            g.add(centralCoil);
+
+            const ballSphere = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), structuralHull);
+            ballSphere.position.set(-0.7, 1.6, 0.7);
+            g.add(ballSphere);
+
+            const satDish = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.25, 8), glowingCore);
+            satDish.rotation.z = Math.PI / 4;
+            satDish.position.set(-0.7, 1.9, 0.7);
+            satDish.name = 'radar_dish';
+            g.add(satDish);
+
+          } else { // Syndicate
+            const organicHiveBase = new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 6), structuralHull);
+            organicHiveBase.scale.set(1.1, 0.4, 1.1);
+            organicHiveBase.position.y = 0.3;
+            organicHiveBase.castShadow = true;
+            organicHiveBase.receiveShadow = true;
+            g.add(organicHiveBase);
+
+            const crystalOb = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.0, 4), glowingCore);
+            crystalOb.position.y = 1.3;
+            g.add(crystalOb);
+
+            const sideSpike1 = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.4, 4), structuralHull);
+            sideSpike1.position.set(1.0, 0.7, -1.0);
+            sideSpike1.rotation.z = -0.3;
+            g.add(sideSpike1);
+
+            const sideSpike2 = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.4, 4), structuralHull);
+            sideSpike2.position.set(-1.0, 0.7, 1.0);
+            sideSpike2.rotation.z = 0.3;
+            g.add(sideSpike2);
+
+            const glowTorus = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.12, 4, 12), glowingCore);
+            glowTorus.rotation.x = Math.PI / 2;
+            glowTorus.position.y = 0.9;
+            glowTorus.name = 'radar_dish';
+            g.add(glowTorus);
+          }
 
         } else if (ent.subType === 'power_plant') {
-          // Circular cylinder building
-          const base = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.6, 1.8, 8), structuralHull);
-          base.position.y = 0.9;
-          base.castShadow = true;
-          g.add(base);
+          if (faction === 'Alliance') {
+            const flatRingBase = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.3, 0.2, 3), structuralHull);
+            flatRingBase.position.y = 0.1;
+            flatRingBase.castShadow = true;
+            g.add(flatRingBase);
 
-          const ring1 = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.2, 6, 16), glowingCore);
-          ring1.rotation.x = Math.PI / 2;
-          ring1.position.y = 1.2;
-          g.add(ring1);
+            const centerOrb = new THREE.Mesh(new THREE.SphereGeometry(0.65, 12, 12), glowingCore);
+            centerOrb.position.y = 1.0;
+            g.add(centerOrb);
 
-          const lightningCone = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1, 4), glowingCore);
-          lightningCone.position.y = 1.8 + 0.5;
-          g.add(lightningCone);
+            const protectionCol = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.4), structuralHull);
+            protectionCol.position.set(0.9, 0.7, 0);
+            g.add(protectionCol);
+
+            const protectionCol2 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.4), structuralHull);
+            protectionCol2.position.set(-0.9, 0.7, 0);
+            g.add(protectionCol2);
+
+            const hoverRing = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.08, 4, 16), glowingCore);
+            hoverRing.rotation.x = Math.PI / 2;
+            hoverRing.position.y = 1.0;
+            g.add(hoverRing);
+
+          } else if (faction === 'Coalition') {
+            const blockBase = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.0, 1.6), structuralHull);
+            blockBase.position.y = 0.5;
+            blockBase.castShadow = true;
+            g.add(blockBase);
+
+            const chimneyS1 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.5, 8), structuralHull);
+            chimneyS1.position.set(-0.5, 1.25, -0.4);
+            g.add(chimneyS1);
+
+            const chimneyGlow1 = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.3, 6), glowingCore);
+            chimneyGlow1.position.set(-0.5, 2.1, -0.4);
+            g.add(chimneyGlow1);
+
+            const chimneyS2 = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 1.3, 8), structuralHull);
+            chimneyS2.position.set(0.5, 1.15, -0.4);
+            g.add(chimneyS2);
+
+            const chimneyGlow2 = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.25, 6), glowingCore);
+            chimneyGlow2.position.set(0.5, 1.9, -0.4);
+            g.add(chimneyGlow2);
+
+            const dieselPiston = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.8), glowingCore);
+            dieselPiston.position.set(0, 0.9, 0.4);
+            g.add(dieselPiston);
+
+          } else if (faction === 'Union') {
+            const subStationCyl = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.8, 8), structuralHull);
+            subStationCyl.position.y = 0.4;
+            subStationCyl.castShadow = true;
+            g.add(subStationCyl);
+
+            const rib1 = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.15, 4, 16), structuralHull);
+            rib1.rotation.x = Math.PI / 2;
+            rib1.position.y = 0.3;
+            g.add(rib1);
+
+            const coilPole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.2), glowingCore);
+            coilPole.position.y = 1.3;
+            g.add(coilPole);
+
+            const emitterRing1 = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.08, 4, 12), glowingCore);
+            emitterRing1.rotation.x = Math.PI / 2;
+            emitterRing1.position.y = 1.4;
+            g.add(emitterRing1);
+
+            const topGlobe = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), glowingCore);
+            topGlobe.position.y = 1.9;
+            g.add(topGlobe);
+
+          } else { // Syndicate
+            const baseDerrick = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.3, 1.5), structuralHull);
+            baseDerrick.position.y = 0.15;
+            baseDerrick.castShadow = true;
+            g.add(baseDerrick);
+
+            const centerPrism = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.1, 4), structuralHull);
+            centerPrism.rotation.x = Math.PI;
+            centerPrism.position.y = 1.0;
+            g.add(centerPrism);
+
+            const giantCrys = new THREE.Mesh(new THREE.OctahedronGeometry(0.52), glowingCore);
+            giantCrys.position.y = 1.5;
+            g.add(giantCrys);
+
+            const orbitalS1 = new THREE.Mesh(new THREE.OctahedronGeometry(0.12), glowingCore);
+            orbitalS1.position.set(0.65, 1.4, 0.65);
+            g.add(orbitalS1);
+
+            const orbitalS2 = new THREE.Mesh(new THREE.OctahedronGeometry(0.12), glowingCore);
+            orbitalS2.position.set(-0.65, 1.4, -0.65);
+            g.add(orbitalS2);
+          }
 
         } else if (ent.subType === 'supply_refinery') {
-          // Tall refinery tower blocks
-          const refineryBase = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.2, 2.5), structuralHull);
-          refineryBase.position.y = 0.6;
+          const refineryBase = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.8, 2.4), structuralHull);
+          refineryBase.position.y = 0.4;
+          refineryBase.castShadow = true;
+          refineryBase.receiveShadow = true;
           g.add(refineryBase);
 
-          const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 2.8, 8), structuralHull);
-          chimney.position.set(-0.6, 1.4, -0.6);
-          chimney.castShadow = true;
-          g.add(chimney);
+          if (faction === 'Alliance') {
+            const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 2.3, 8), structuralHull);
+            chimney.position.set(-0.6, 1.15 + 0.4, -0.6);
+            g.add(chimney);
 
-          const flameTip = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.6, 8), glowingCore);
-          flameTip.position.set(-0.6, 2.8 + 0.3, -0.6);
-          g.add(flameTip);
+            const flare = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), glowingCore);
+            flare.position.set(-0.6, 2.5 + 0.4, -0.6);
+            g.add(flare);
 
-          // Rotating automated oil pump arm
-          const pumpRig = new THREE.Group();
-          pumpRig.position.set(0.6, 1.2, 0);
+            const pumpRig = new THREE.Group();
+            pumpRig.position.set(0.6, 0.8, 0);
+            const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.0, 0.15), structuralHull);
+            shaft.position.y = 0.5;
+            pumpRig.add(shaft);
+            const walkingBeam = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.15, 0.2), glowingCore);
+            walkingBeam.position.set(0.3, 1.0, 0);
+            walkingBeam.name = 'pump_arm';
+            pumpRig.add(walkingBeam);
+            g.add(pumpRig);
 
-          const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.2, 0.2), structuralHull);
-          shaft.position.y = 0.6;
-          pumpRig.add(shaft);
+          } else if (faction === 'Coalition') {
+            const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 2.5, 8), structuralHull);
+            chimney.position.set(-0.5, 1.25 + 0.4, -0.5);
+            g.add(chimney);
 
-          const walkingBeam = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.2, 0.3), glowingCore);
-          walkingBeam.position.set(0.4, 1.2, 0);
-          walkingBeam.name = 'pump_arm'; // animate pivot
-          pumpRig.add(walkingBeam);
+            const flare = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 8), glowingCore);
+            flare.position.set(-0.5, 2.7 + 0.4, -0.5);
+            g.add(flare);
 
-          g.add(pumpRig);
+            const pumpRig = new THREE.Group();
+            pumpRig.position.set(0.5, 0.8, 0.1);
+            const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.0, 0.2), structuralHull);
+            shaft.position.y = 0.5;
+            pumpRig.add(shaft);
+            const walkingBeam = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.2, 0.3), glowingCore);
+            walkingBeam.position.set(0.4, 1.0, 0);
+            walkingBeam.name = 'pump_arm';
+            pumpRig.add(walkingBeam);
+            g.add(pumpRig);
+
+          } else if (faction === 'Union') {
+            const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 2.1, 8), structuralHull);
+            chimney.position.set(-0.5, 1.05 + 0.4, -0.5);
+            g.add(chimney);
+
+            const flare = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.45, 8), glowingCore);
+            flare.position.set(-0.5, 2.3 + 0.4, -0.5);
+            g.add(flare);
+
+            const electricalCoil = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), glowingCore);
+            electricalCoil.position.set(-0.5, 2.65 + 0.4, -0.5);
+            g.add(electricalCoil);
+
+            const pumpRig = new THREE.Group();
+            pumpRig.position.set(0.5, 0.8, 0);
+            const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.9, 0.18), structuralHull);
+            shaft.position.y = 0.45;
+            pumpRig.add(shaft);
+            const walkingBeam = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.18, 0.22), glowingCore);
+            walkingBeam.position.set(0.3, 0.9, 0);
+            walkingBeam.name = 'pump_arm';
+            pumpRig.add(walkingBeam);
+            g.add(pumpRig);
+
+          } else { // Syndicate
+            const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 2.2, 8), structuralHull);
+            chimney.position.set(-0.6, 1.1 + 0.4, -0.6);
+            g.add(chimney);
+
+            const flare = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.52, 6), glowingCore);
+            flare.position.set(-0.6, 2.45 + 0.4, -0.6);
+            g.add(flare);
+
+            const chemicalPipe = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.08, 4, 12), glowingCore);
+            chemicalPipe.position.set(-0.6, 0.8 + 0.4, -0.6);
+            g.add(chemicalPipe);
+
+            const pumpRig = new THREE.Group();
+            pumpRig.position.set(0.6, 0.8, 0);
+            const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.9, 0.15), structuralHull);
+            shaft.position.y = 0.45;
+            pumpRig.add(shaft);
+            const walkingBeam = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.16, 0.2), glowingCore);
+            walkingBeam.position.set(0.35, 0.9, 0);
+            walkingBeam.name = 'pump_arm';
+            pumpRig.add(walkingBeam);
+            g.add(pumpRig);
+          }
 
         } else if (ent.subType === 'barracks') {
-          // Circular command dome
-          const dome = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 2, 1.6, 8), structuralHull);
-          dome.position.y = 0.8;
-          g.add(dome);
+          if (faction === 'Alliance') {
+            const outerRing = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.14, 4, 16), structuralHull);
+            outerRing.rotation.x = Math.PI / 2;
+            outerRing.position.y = 0.1;
+            outerRing.castShadow = true;
+            g.add(outerRing);
 
-          const landingPad = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.15, 2.4), glowingCore);
-          landingPad.position.set(0, 0.1, 0);
-          g.add(landingPad);
+            const holoGate = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 1.4, 8), glowingCore);
+            holoGate.position.y = 0.7;
+            holoGate.scale.set(1.0, 1.0, 0.2);
+            g.add(holoGate);
+
+          } else if (faction === 'Coalition') {
+            const hangar = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 2.2, 12, 1), structuralHull);
+            hangar.rotation.z = Math.PI / 2;
+            hangar.scale.set(1.0, 1.0, 0.75);
+            hangar.position.y = 0.6;
+            hangar.castShadow = true;
+            g.add(hangar);
+
+            const gateDoor = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.8, 0.1), glowingCore);
+            gateDoor.position.set(0, 0.4, 1.05);
+            g.add(gateDoor);
+
+          } else if (faction === 'Union') {
+            const blockyA = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.3, 2.0), structuralHull);
+            blockyA.position.y = 0.65;
+            blockyA.castShadow = true;
+            g.add(blockyA);
+
+            const entranceCover = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 0.6), glowingCore);
+            entranceCover.position.set(0, 0.35, 1.1);
+            g.add(entranceCover);
+
+            const antennaSteel = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.8), structuralHull);
+            antennaSteel.position.set(0.7, 1.5, -0.7);
+            g.add(antennaSteel);
+
+          } else { // Syndicate
+            const pond = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.3, 0.2, 8), structuralHull);
+            pond.position.y = 0.1;
+            pond.castShadow = true;
+            g.add(pond);
+
+            const podCapsule = new THREE.Mesh(new THREE.SphereGeometry(0.7, 12, 12), glowingCore);
+            podCapsule.scale.set(1.0, 1.3, 1.0);
+            podCapsule.position.y = 0.8;
+            g.add(podCapsule);
+
+            const shellAppendage = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.1, 4, 12), structuralHull);
+            shellAppendage.rotation.y = Math.PI / 2;
+            shellAppendage.position.y = 0.8;
+            g.add(shellAppendage);
+          }
 
         } else if (ent.subType === 'war_factory') {
-          // Blocky open-door vehicle assembly building
-          const hangar = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.8, 2.4), structuralHull);
-          hangar.position.y = 0.9;
-          g.add(hangar);
+          if (faction === 'Alliance') {
+            const flatBay = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.16, 2.8), structuralHull);
+            flatBay.position.y = 0.08;
+            flatBay.castShadow = true;
+            g.add(flatBay);
 
-          // Glowing internal scanner grid
-          const gate = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, 0.2), glowingCore);
-          gate.position.set(0, 0.6, 1.22);
-          g.add(gate);
+            const archGantry = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.25, 0.4), structuralHull);
+            archGantry.position.set(0, 1.8, 0);
+            g.add(archGantry);
+
+            const archLLeg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.8, 0.4), structuralHull);
+            archLLeg.position.set(-1.4, 0.9, 0);
+            g.add(archLLeg);
+
+            const archRLeg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.8, 0.4), structuralHull);
+            archRLeg.position.set(1.4, 0.9, 0);
+            g.add(archRLeg);
+
+            const scanningBeamLaser = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.08, 0.08), glowingCore);
+            scanningBeamLaser.position.set(0, 1.65, 0);
+            g.add(scanningBeamLaser);
+
+          } else if (faction === 'Coalition') {
+            const warehouse = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.6, 2.2), structuralHull);
+            warehouse.position.y = 0.8;
+            warehouse.castShadow = true;
+            g.add(warehouse);
+
+            const heavyGate = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.1, 0.15), glowingCore);
+            heavyGate.position.set(0, 0.55, 1.12);
+            g.add(heavyGate);
+
+            const chimneySmelter1 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 1.3), structuralHull);
+            chimneySmelter1.position.set(-1.1, 1.7, -0.6);
+            g.add(chimneySmelter1);
+
+            const chimneySmelter2 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 1.3), structuralHull);
+            chimneySmelter2.position.set(1.1, 1.7, -0.6);
+            g.add(chimneySmelter2);
+
+          } else if (faction === 'Union') {
+            const mainBuildWorkshop = new THREE.Mesh(new THREE.BoxGeometry(2.7, 1.3, 2.4), structuralHull);
+            mainBuildWorkshop.position.y = 0.65;
+            mainBuildWorkshop.castShadow = true;
+            g.add(mainBuildWorkshop);
+
+            const glowingLineA = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.1, 0.1), glowingCore);
+            glowingLineA.position.set(0, 1.25, 1.21);
+            g.add(glowingLineA);
+
+            const powerRailCopper = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.08, 4, 16), glowingCore);
+            powerRailCopper.rotation.y = Math.PI / 2;
+            powerRailCopper.position.set(-1.0, 1.3, 0);
+            g.add(powerRailCopper);
+
+            const assemblyCraneRail = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.1, 0.2), structuralHull);
+            assemblyCraneRail.position.set(1.0, 1.1, 0.9);
+            g.add(assemblyCraneRail);
+
+          } else { // Syndicate
+            const hollowRuinBase = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.7, 0.8, 8), structuralHull);
+            hollowRuinBase.position.y = 0.4;
+            hollowRuinBase.castShadow = true;
+            g.add(hollowRuinBase);
+
+            const glowingChemicalFluidS = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.1, 8), glowingCore);
+            glowingChemicalFluidS.position.y = 0.78;
+            g.add(glowingChemicalFluidS);
+
+            const injectorPipe1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.1), structuralHull);
+            injectorPipe1.rotation.z = -0.6;
+            injectorPipe1.position.set(-1.1, 0.7, 0);
+            g.add(injectorPipe1);
+
+            const injectorPipe2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.1), structuralHull);
+            injectorPipe2.rotation.z = 0.6;
+            injectorPipe2.position.set(1.1, 0.7, 0);
+            g.add(injectorPipe2);
+          }
 
         } else if (ent.subType === 'defense_turret') {
-          // Ground base plus high railgun turret neck turn
-          const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 1, 8), structuralHull);
-          turretBase.position.y = 0.5;
+          const turretBase = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.0, 0.7, 8), structuralHull);
+          turretBase.position.y = 0.35;
+          turretBase.castShadow = true;
           g.add(turretBase);
 
-          // Head turning part
-          const neckGroup = new THREE.Group();
-          neckGroup.position.y = 1;
-          neckGroup.name = 'railgun_head';
+          if (faction === 'Alliance') {
+            const pedestalCol = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.3, 1.6), structuralHull);
+            pedestalCol.position.y = 1.15;
+            g.add(pedestalCol);
 
-          const headBlock = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.8), structuralHull);
-          headBlock.position.y = 0.25;
-          neckGroup.add(headBlock);
+            const headRotGroupNode = new THREE.Group();
+            headRotGroupNode.position.y = 1.95;
+            headRotGroupNode.name = 'railgun_head';
 
-          // Heavy gun tubes
-          const barrel1 = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.5, 6), glowingCore);
-          barrel1.rotation.x = Math.PI / 2;
-          barrel1.position.set(-0.22, 0.25, -0.6);
-          neckGroup.add(barrel1);
+            const laserPrismCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.42), glowingCore);
+            laserPrismCore.name = 'floating_crys';
+            headRotGroupNode.add(laserPrismCore);
 
-          const barrel2 = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.5, 6), glowingCore);
-          barrel2.rotation.x = Math.PI / 2;
-          barrel2.position.set(0.22, 0.25, -0.6);
-          neckGroup.add(barrel2);
+            const crystalRing = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.05, 4, 12), structuralHull);
+            crystalRing.rotation.x = Math.PI / 2;
+            headRotGroupNode.add(crystalRing);
 
-          g.add(neckGroup);
+            g.add(headRotGroupNode);
+
+          } else if (faction === 'Coalition') {
+            const pivotHeadGroupNode = new THREE.Group();
+            pivotHeadGroupNode.position.y = 0.7;
+            pivotHeadGroupNode.name = 'railgun_head';
+
+            const shieldP = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.9), structuralHull);
+            shieldP.position.y = 0.3;
+            pivotHeadGroupNode.add(shieldP);
+
+            const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.4), glowingCore);
+            b1.rotation.x = Math.PI / 2;
+            b1.position.set(-0.2, 0.3, 0.6);
+            pivotHeadGroupNode.add(b1);
+
+            const b2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.4), glowingCore);
+            b2.rotation.x = Math.PI / 2;
+            b2.position.set(0.2, 0.3, 0.6);
+            pivotHeadGroupNode.add(b2);
+
+            g.add(pivotHeadGroupNode);
+
+          } else if (faction === 'Union') {
+            const antennaMastPole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.5), structuralHull);
+            antennaMastPole.position.y = 1.1;
+            g.add(antennaMastPole);
+
+            const glassGrid1 = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.06, 4, 12), structuralHull);
+            glassGrid1.rotation.x = Math.PI / 2;
+            glassGrid1.position.y = 1.0;
+            g.add(glassGrid1);
+
+            const glassGrid2 = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.06, 4, 12), structuralHull);
+            glassGrid2.rotation.x = Math.PI / 2;
+            glassGrid2.position.y = 1.4;
+            g.add(glassGrid2);
+
+            const headRotGroupNode = new THREE.Group();
+            headRotGroupNode.position.y = 1.85;
+            headRotGroupNode.name = 'railgun_head';
+
+            const copperGlobe = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), glowingCore);
+            headRotGroupNode.add(copperGlobe);
+
+            g.add(headRotGroupNode);
+
+          } else { // Syndicate
+            const organicMountSegment = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 1.2), structuralHull);
+            organicMountSegment.rotation.z = 0.15;
+            organicMountSegment.position.set(-0.15, 0.9, 0);
+            g.add(organicMountSegment);
+
+            const headRotGroupNode = new THREE.Group();
+            headRotGroupNode.position.set(0, 1.4, 0);
+            headRotGroupNode.name = 'railgun_head';
+
+            const spikeSackHead = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 8), structuralHull);
+            spikeSackHead.rotation.x = Math.PI / 2;
+            headRotGroupNode.add(spikeSackHead);
+
+            const organicVenomCoreBall = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), glowingCore);
+            organicVenomCoreBall.position.set(0, 0, 0.3);
+            headRotGroupNode.add(organicVenomCoreBall);
+
+            g.add(headRotGroupNode);
+          }
         }
+
       } else {
-        // ENTTY IS UNIT
-        const vehicleHull = new THREE.MeshStandardMaterial({ color: '#4b5563', roughness: 0.5 });
-        const dynamicCoating = new THREE.MeshStandardMaterial({ color: pColor, roughness: 0.3 });
-
         if (ent.subType === 'drone_scout') {
-          // Quadcopter layout mesh
-          const frame = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), vehicleHull);
-          frame.position.y = 0.65;
-          g.add(frame);
+          if (faction === 'Alliance') {
+            const wingTri = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 3), dynamicCoating);
+            wingTri.rotation.x = Math.PI / 2;
+            wingTri.position.y = 0.65;
+            g.add(wingTri);
 
-          const rotRings = new THREE.Group();
-          rotRings.name = 'rotors';
+            const lightS = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), glowingCore);
+            lightS.position.set(0, 0.52, 0.2);
+            g.add(lightS);
 
-          // 4 corner rotors
-          const rPosCoords = [
-            [-0.4, 0.65, -0.4],
-            [0.4, 0.65, -0.4],
-            [-0.4, 0.65, 0.4],
-            [0.4, 0.65, 0.4]
-          ];
-          rPosCoords.forEach((coord, rIdx) => {
-            const rotBase = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.1), vehicleHull);
-            rotBase.position.set(coord[0], coord[1], coord[2]);
-            rotRings.add(rotBase);
+          } else if (faction === 'Coalition') {
+            const hullBox = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.65), vehicleHull);
+            hullBox.position.y = 0.6;
+            g.add(hullBox);
 
-            const blade = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.06), dynamicCoating);
-            blade.position.set(coord[0], coord[1] + 0.05, coord[2]);
-            blade.name = `blade_${rIdx}`;
-            rotRings.add(blade);
-          });
-          g.add(rotRings);
+            const rotGroup = new THREE.Group();
+            rotGroup.name = 'rotors';
+            const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.05), dynamicCoating);
+            b1.position.set(0, 0.74, 0.15);
+            b1.name = 'blade_0';
+            rotGroup.add(b1);
+            const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.05), dynamicCoating);
+            b2.position.set(0, 0.78, -0.15);
+            b2.name = 'blade_1';
+            rotGroup.add(b2);
+            g.add(rotGroup);
+
+          } else if (faction === 'Union') {
+            const wireSputnik = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 10), vehicleHull);
+            wireSputnik.position.y = 0.65;
+            g.add(wireSputnik);
+
+            const searchEyeLamp = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.2), glowingCore);
+            searchEyeLamp.rotation.x = Math.PI/2;
+            searchEyeLamp.position.set(0, 0.65, 0.16);
+            g.add(searchEyeLamp);
+
+            [[-0.15, -0.15], [0.15, -0.15], [-0.15, 0.15], [0.15, 0.15]].forEach((off) => {
+              const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.6), glowingCore);
+              ant.rotation.set(0.4, 0, (Math.random()-0.5)*0.3);
+              ant.position.set(off[0], 0.45, off[1]);
+              g.add(ant);
+            });
+
+          } else { // Syndicate
+            const heartFrame = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 6), vehicleHull);
+            heartFrame.position.y = 0.64;
+            g.add(heartFrame);
+
+            const venomScythe1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 0.2), dynamicCoating);
+            venomScythe1.rotation.y = 0.4;
+            venomScythe1.position.set(0.25, 0.65, 0.15);
+            g.add(venomScythe1);
+
+            const venomScythe2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 0.2), dynamicCoating);
+            venomScythe2.rotation.y = -0.4;
+            venomScythe2.position.set(-0.25, 0.65, 0.15);
+            g.add(venomScythe2);
+          }
 
         } else if (ent.subType === 'drone_kamikaze') {
-          // Delta wing flying rocket drone
-          const wing = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.1, 3), dynamicCoating);
-          wing.rotation.x = Math.PI / 2; // point forward
-          wing.position.y = 0.8;
-          g.add(wing);
+          if (faction === 'Alliance') {
+            const bodyR = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.8), structuralHull);
+            bodyR.rotation.x = Math.PI / 2;
+            bodyR.position.y = 0.65;
+            g.add(bodyR);
 
-          const spinBlade = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.02, 0.04), vehicleHull);
-          spinBlade.position.set(0, 0.8, -0.56);
-          spinBlade.name = 'rear_prop';
-          g.add(spinBlade);
+            const exhaustThrusterJet = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.3, 6), glowingCore);
+            exhaustThrusterJet.rotation.x = -Math.PI / 2;
+            exhaustThrusterJet.position.set(0, 0.65, -0.45);
+            g.add(exhaustThrusterJet);
+
+          } else if (faction === 'Coalition') {
+            const slabG = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.7), vehicleHull);
+            slabG.position.y = 0.6;
+            g.add(slabG);
+
+            const redExposeNose = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), glowingCore);
+            redExposeNose.position.set(0, 0.6, 0.35);
+            g.add(redExposeNose);
+
+            const rearBladeNode = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 0.04), structuralHull);
+            rearBladeNode.name = 'rear_prop';
+            rearBladeNode.position.set(0, 0.6, -0.38);
+            g.add(rearBladeNode);
+
+          } else if (faction === 'Union') {
+            const thinBody = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.75), dynamicCoating);
+            thinBody.rotation.x = Math.PI / 2;
+            thinBody.position.y = 0.62;
+            g.add(thinBody);
+
+            const wingTop = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.015, 0.2), structuralHull);
+            wingTop.position.set(0, 0.75, 0.1);
+            g.add(wingTop);
+
+            const wingBot = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.015, 0.2), structuralHull);
+            wingBot.position.set(0, 0.48, 0.1);
+            g.add(wingBot);
+
+            const spinBladeGroup = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.02, 0.03), structuralHull);
+            spinBladeGroup.name = 'rear_prop';
+            spinBladeGroup.position.set(0, 0.62, 0.38);
+            g.add(spinBladeGroup);
+
+          } else { // Syndicate
+            const tickShieldHull = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), vehicleHull);
+            tickShieldHull.position.y = 0.45;
+            g.add(tickShieldHull);
+
+            const acidEggGland = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 8), glowingCore);
+            acidEggGland.scale.set(0.9, 0.9, 1.25);
+            acidEggGland.position.set(0, 0.52, -0.15);
+            g.add(acidEggGland);
+
+            const mandLeft = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.16), glowingCore);
+            mandLeft.position.set(-0.08, 0.4, 0.22);
+            g.add(mandLeft);
+
+            const mandRight = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.16), glowingCore);
+            mandRight.position.set(0.08, 0.4, 0.22);
+            g.add(mandRight);
+          }
 
         } else if (ent.subType === 'cyber_specops') {
-          // Special infantry model cylinders
-          const body = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 0.8, 8), vehicleHull);
-          body.position.y = 0.4;
-          g.add(body);
+          const baseHumCyl = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.8, 8), vehicleHull);
+          baseHumCyl.position.y = 0.4;
+          g.add(baseHumCyl);
 
-          const visor = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshBasicMaterial({ color: pColor }));
-          visor.position.set(0, 0.72, 0.1);
-          g.add(visor);
+          if (faction === 'Alliance') {
+            const visorL = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 6), glowingCore);
+            visorL.position.set(0, 0.72, 0.12);
+            g.add(visorL);
+
+            const lanceArm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.2), glowingCore);
+            lanceArm.rotation.x = Math.PI / 4;
+            lanceArm.position.set(0.22, 0.45, 0.12);
+            g.add(lanceArm);
+
+          } else if (faction === 'Coalition') {
+            const flamethrowerTank = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5), dynamicCoating);
+            flamethrowerTank.position.set(0, 0.45, -0.22);
+            g.add(flamethrowerTank);
+
+            const weaponNozzlePipe = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.65), structuralHull);
+            weaponNozzlePipe.position.set(0.2, 0.35, 0.2);
+            g.add(weaponNozzlePipe);
+
+            const maskVisorS = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), glowingCore);
+            maskVisorS.position.set(0, 0.72, 0.1);
+            g.add(maskVisorS);
+
+          } else if (faction === 'Union') {
+            const conductorPlates = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.45, 0.38), dynamicCoating);
+            conductorPlates.position.set(0, 0.42, -0.16);
+            g.add(conductorPlates);
+
+            const coilLHand = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.22), glowingCore);
+            coilLHand.position.set(-0.24, 0.3, 0.1);
+            g.add(coilLHand);
+
+            const coilRHand = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.22), glowingCore);
+            coilRHand.position.set(0.24, 0.3, 0.1);
+            g.add(coilRHand);
+
+          } else { // Syndicate
+            const hoodHelmet = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.4, 4), structuralHull);
+            hoodHelmet.position.y = 0.58;
+            g.add(hoodHelmet);
+
+            const bladeL = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.08, 0.5), glowingCore);
+            bladeL.rotation.x = Math.PI / 4;
+            bladeL.position.set(-0.2, 0.3, 0.2);
+            g.add(bladeL);
+
+            const bladeR = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.08, 0.5), glowingCore);
+            bladeR.rotation.x = Math.PI / 4;
+            bladeR.position.set(0.2, 0.3, 0.2);
+            g.add(bladeR);
+          }
 
         } else if (ent.subType === 'precision_tank') {
-          // Combat tank - body tread plus separate head pivoting towards targets!
-          const treads = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 1.8), vehicleHull);
-          treads.position.y = 0.2;
-          g.add(treads);
+          if (faction === 'Alliance') {
+            const hoverBody = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.32, 1.8), vehicleHull);
+            hoverBody.position.y = 0.25;
+            g.add(hoverBody);
 
-          const plate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.2, 1.5), dynamicCoating);
-          plate.position.y = 0.4 + 0.1;
-          g.add(plate);
+            const hoverPadL = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.7), dynamicCoating);
+            hoverPadL.rotation.x = Math.PI / 2;
+            hoverPadL.position.set(-0.64, 0.12, 0);
+            g.add(hoverPadL);
 
-          const pivotTurret = new THREE.Group();
-          pivotTurret.position.y = 0.6;
-          pivotTurret.name = 'tank_head';
+            const hoverPadR = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.7), dynamicCoating);
+            hoverPadR.rotation.x = Math.PI / 2;
+            hoverPadR.position.set(0.64, 0.12, 0);
+            g.add(hoverPadR);
 
-          const headBlock = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 0.4, 8), vehicleHull);
-          headBlock.position.y = 0.2;
-          pivotTurret.add(headBlock);
+            const turPivotGroupNode = new THREE.Group();
+            turPivotGroupNode.position.y = 0.44;
+            turPivotGroupNode.name = 'tank_head';
 
-          const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.5, 6), dynamicCoating);
-          gunBarrel.rotation.x = Math.PI / 2;
-          // Extend out the front (+Z is front!)
-          gunBarrel.position.set(0, 0.2, 0.75);
-          pivotTurret.add(gunBarrel);
+            const sleekCapNode = new THREE.Mesh(new THREE.SphereGeometry(0.42, 8, 8), vehicleHull);
+            sleekCapNode.scale.set(1.0, 0.6, 1.0);
+            sleekCapNode.position.y = 0.15;
+            turPivotGroupNode.add(sleekCapNode);
 
-          g.add(pivotTurret);
+            const heavyDoubleLasers = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.3), glowingCore);
+            heavyDoubleLasers.rotation.x = Math.PI / 2;
+            heavyDoubleLasers.position.set(-0.16, 0.15, 0.72);
+            turPivotGroupNode.add(heavyDoubleLasers);
+
+            const heavyDoubleLasers2 = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.3), glowingCore);
+            heavyDoubleLasers2.rotation.x = Math.PI / 2;
+            heavyDoubleLasers2.position.set(0.16, 0.15, 0.72);
+            turPivotGroupNode.add(heavyDoubleLasers2);
+
+            g.add(turPivotGroupNode);
+
+          } else if (faction === 'Coalition') {
+            const treadsL1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.35, 0.95), structuralHull);
+            treadsL1.position.set(-0.6, 0.18, 0.52);
+            g.add(treadsL1);
+            const treadsR1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.35, 0.95), structuralHull);
+            treadsR1.position.set(0.6, 0.18, 0.52);
+            g.add(treadsR1);
+            const treadsL2 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.35, 0.95), structuralHull);
+            treadsL2.position.set(-0.6, 0.18, -0.52);
+            g.add(treadsL2);
+            const treadsR2 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.35, 0.95), structuralHull);
+            treadsR2.position.set(0.6, 0.18, -0.52);
+            g.add(treadsR2);
+
+            const fortressPlate = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.35, 1.9), dynamicCoating);
+            fortressPlate.position.y = 0.36;
+            g.add(fortressPlate);
+
+            const turPivotGroupNode = new THREE.Group();
+            turPivotGroupNode.position.y = 0.54;
+            turPivotGroupNode.name = 'tank_head';
+
+            const centralDomeBlock = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.45, 1.05), vehicleHull);
+            centralDomeBlock.position.y = 0.22;
+            turPivotGroupNode.add(centralDomeBlock);
+
+            const massiveL = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 6), structuralHull);
+            massiveL.rotation.x = Math.PI / 2;
+            massiveL.position.set(-0.2, 0.22, 0.75);
+            turPivotGroupNode.add(massiveL);
+
+            const massiveR = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 6), structuralHull);
+            massiveR.rotation.x = Math.PI / 2;
+            massiveR.position.set(0.2, 0.22, 0.75);
+            turPivotGroupNode.add(massiveR);
+
+            g.add(turPivotGroupNode);
+
+          } else if (faction === 'Union') {
+            const wheelTreads = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.3, 1.6), vehicleHull);
+            wheelTreads.position.y = 0.15;
+            g.add(wheelTreads);
+
+            const copperPlateTop = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.2, 1.35), dynamicCoating);
+            copperPlateTop.position.y = 0.38;
+            g.add(copperPlateTop);
+
+            const turPivotGroupNode = new THREE.Group();
+            turPivotGroupNode.position.y = 0.48;
+            turPivotGroupNode.name = 'tank_head';
+
+            const globeCoreArm = new THREE.Mesh(new THREE.SphereGeometry(0.4, 10, 10), vehicleHull);
+            globeCoreArm.position.y = 0.2;
+            turPivotGroupNode.add(globeCoreArm);
+
+            const ringConductorLine = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.05, 4, 12), glowingCore);
+            ringConductorLine.rotation.x = Math.PI / 2;
+            ringConductorLine.position.y = 0.2;
+            turPivotGroupNode.add(ringConductorLine);
+
+            const lightningBallPew = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), glowingCore);
+            lightningBallPew.position.set(0, 0.2, 0.55);
+            turPivotGroupNode.add(lightningBallPew);
+
+            g.add(turPivotGroupNode);
+
+          } else { // Syndicate
+            const spiderBodyCap = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), dynamicCoating);
+            spiderBodyCap.scale.set(1.0, 0.65, 1.4);
+            spiderBodyCap.position.y = 0.4;
+            g.add(spiderBodyCap);
+
+            const offsets = [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]];
+            offsets.forEach((off) => {
+              const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.7), structuralHull);
+              leg.rotation.z = off[0] > 0 ? 0.6 : -0.6;
+              leg.position.set(off[0]*0.9, 0.25, off[1]*0.9);
+              g.add(leg);
+            });
+
+            const turPivotGroupNode = new THREE.Group();
+            turPivotGroupNode.position.y = 0.68;
+            turPivotGroupNode.name = 'tank_head';
+
+            const venomDripSac = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 6), glowingCore);
+            venomDripSac.position.set(0, 0, 0.1);
+            turPivotGroupNode.add(venomDripSac);
+
+            const bioBarrelP = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 0.9, 6), structuralHull);
+            bioBarrelP.rotation.x = Math.PI / 2 + 0.1;
+            bioBarrelP.position.set(0, 0.04, 0.48);
+            turPivotGroupNode.add(bioBarrelP);
+
+            g.add(turPivotGroupNode);
+          }
 
         } else if (ent.subType === 'artillery_mlrs') {
-          // Heavy truck MLRS carrying raised rocket pod
-          const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 2.0), vehicleHull);
-          body.position.y = 0.25;
-          g.add(body);
+          if (faction === 'Alliance') {
+            const baseChas = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.35, 1.9), vehicleHull);
+            baseChas.position.y = 0.2;
+            g.add(baseChas);
 
-          const cab = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.4, 0.5), dynamicCoating);
-          cab.position.set(0, 0.55, 0.65);
-          g.add(cab);
+            const launchRig = new THREE.Group();
+            launchRig.position.set(0, 0.35, -0.3);
+            launchRig.name = 'mlrs_barrel';
+            const railSNode = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.25, 1.6), dynamicCoating);
+            railSNode.position.z = 0.4;
+            launchRig.add(railSNode);
+            const lineMagnet = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.8), glowingCore);
+            lineMagnet.position.set(0, 0.13, 0.4);
+            launchRig.add(lineMagnet);
+            g.add(launchRig);
 
-          const launcherPod = new THREE.Group();
-          launcherPod.position.set(0, 0.5, -0.4);
-          launcherPod.name = 'mlrs_barrel';
+          } else if (faction === 'Coalition') {
+            const truckBody = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.4, 2.1), vehicleHull);
+            truckBody.position.y = 0.22;
+            g.add(truckBody);
 
-          const tubes = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 1.3), dynamicCoating);
-          tubes.position.z = -0.3;
-          launcherPod.add(tubes);
+            const heavyCabS = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.4, 0.55), dynamicCoating);
+            heavyCabS.position.set(0, 0.58, 0.68);
+            g.add(heavyCabS);
 
-          g.add(launcherPod);
+            const launchRig = new THREE.Group();
+            launchRig.position.set(0, 0.42, -0.36);
+            launchRig.name = 'mlrs_barrel';
+            const tubesRack = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.48, 1.25), dynamicCoating);
+            tubesRack.position.z = -0.15;
+            launchRig.add(tubesRack);
+            g.add(launchRig);
+
+          } else if (faction === 'Union') {
+            const flatbedChas = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.3, 1.8), vehicleHull);
+            flatbedChas.position.y = 0.15;
+            g.add(flatbedChas);
+
+            const driverBox = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.35, 0.5), dynamicCoating);
+            driverBox.position.set(0, 0.48, 0.58);
+            g.add(driverBox);
+
+            const launchRig = new THREE.Group();
+            launchRig.position.set(0, 0.3, -0.3);
+            launchRig.name = 'mlrs_barrel';
+
+            const frameworkGirder = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 1.2), structuralHull);
+            launchRig.add(frameworkGirder);
+
+            for (let k = -2; k <= 2; k++) {
+              if (k === 0) continue;
+              const rocketB = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.8), glowingCore);
+              rocketB.rotation.x = Math.PI / 2;
+              rocketB.position.set(k*0.18, 0.12, 0.15);
+              launchRig.add(rocketB);
+            }
+            g.add(launchRig);
+
+          } else { // Syndicate
+            const organicFlatchNode = new THREE.Mesh(new THREE.SphereGeometry(0.48, 8, 8), vehicleHull);
+            organicFlatchNode.scale.set(1.15, 0.45, 1.7);
+            organicFlatchNode.position.y = 0.22;
+            g.add(organicFlatchNode);
+
+            const launchRig = new THREE.Group();
+            launchRig.position.set(0, 0.45, -0.2);
+            launchRig.name = 'mlrs_barrel';
+
+            const venomSporeCat = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), glowingCore);
+            venomSporeCat.scale.set(0.7, 0.7, 1.25);
+            launchRig.add(venomSporeCat);
+
+            const nozzleH = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.18, 0.65), structuralHull);
+            nozzleH.rotation.x = Math.PI/2;
+            nozzleH.position.set(0, 0, 0.55);
+            launchRig.add(nozzleH);
+
+            g.add(launchRig);
+          }
 
         } else if (ent.subType === 'mobile_jammer') {
-          // EW Vehicle carrying rotating magenta ring radar antenna dish!
-          const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 1.8), vehicleHull);
-          body.position.y = 0.25;
-          g.add(body);
+          const bodyCabin = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.42, 1.75), vehicleHull);
+          bodyCabin.position.y = 0.22;
+          g.add(bodyCabin);
 
-          const radarDishBase = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.6), dynamicCoating);
-          radarDishBase.position.set(0, 0.7, 0);
-          g.add(radarDishBase);
+          if (faction === 'Alliance') {
+            const domeProjector = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), glowingCore);
+            domeProjector.position.set(0, 0.66, -0.1);
+            g.add(domeProjector);
 
-          const activeDish = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.08, 4, 16), new THREE.MeshBasicMaterial({ color: '#d946ef' }));
-          activeDish.rotation.x = Math.PI / 2;
-          activeDish.position.set(0, 1.0, 0);
-          activeDish.name = 'ew_antenna';
-          g.add(activeDish);
+            const emitterRingS = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 4, 12), glowingCore);
+            emitterRingS.rotation.x = Math.PI / 2;
+            emitterRingS.position.set(0, 0.7, -0.1);
+            emitterRingS.name = 'ew_antenna';
+            g.add(emitterRingS);
+
+          } else if (faction === 'Coalition') {
+            const postRack = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.65), structuralHull);
+            postRack.position.set(0, 0.66, -0.15);
+            g.add(postRack);
+
+            const rotatingDishGrid = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.25, 8), glowingCore);
+            rotatingDishGrid.rotation.z = Math.PI / 3;
+            rotatingDishGrid.position.set(0, 0.95, -0.15);
+            rotatingDishGrid.name = 'ew_antenna';
+            g.add(rotatingDishGrid);
+
+          } else if (faction === 'Union') {
+            const mastRack = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.62, 0.12), structuralHull);
+            mastRack.position.set(0, 0.65, -0.1);
+            g.add(mastRack);
+
+            const loopGridCoilL = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.05, 4, 12), glowingCore);
+            loopGridCoilL.rotation.y = Math.PI / 2;
+            loopGridCoilL.position.set(-0.25, 0.95, -0.1);
+            loopGridCoilL.name = 'ew_antenna';
+            g.add(loopGridCoilL);
+
+            const loopGridCoilR = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.05, 4, 12), glowingCore);
+            loopGridCoilR.rotation.y = Math.PI / 2;
+            loopGridCoilR.position.set(0.25, 0.95, -0.1);
+            loopGridCoilR.name = 'ew_antenna';
+            g.add(loopGridCoilR);
+
+          } else { // Syndicate
+            const driftCrys = new THREE.Mesh(new THREE.OctahedronGeometry(0.38), glowingCore);
+            driftCrys.position.set(0, 0.74, -0.1);
+            driftCrys.name = 'ew_antenna';
+            g.add(driftCrys);
+
+            const protectiveOrbClaws1 = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.5, 4), structuralHull);
+            protectiveOrbClaws1.position.set(0.3, 0.54, 0.1);
+            protectiveOrbClaws1.rotation.z = -0.3;
+            g.add(protectiveOrbClaws1);
+
+            const protectiveOrbClaws2 = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.5, 4), structuralHull);
+            protectiveOrbClaws2.position.set(-0.3, 0.54, 0.1);
+            protectiveOrbClaws2.rotation.z = 0.3;
+            g.add(protectiveOrbClaws2);
+          }
         }
       }
 
@@ -973,22 +1752,99 @@ export default function RTSGameCanvas({
     }[] = [];
 
     const handleMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return; // Only trigger for left-clicks
       isMouseDown = true;
       mouseDownPos.x = e.clientX;
       mouseDownPos.y = e.clientY;
     };
 
+    const handleMouseMoveSelection = (e: MouseEvent) => {
+      if (!isMouseDown) return;
+      const deltaX = Math.abs(e.clientX - mouseDownPos.x);
+      const deltaY = Math.abs(e.clientY - mouseDownPos.y);
+      if (deltaX >= 6 || deltaY >= 6) {
+        setDragSelection({
+          x1: mouseDownPos.x,
+          y1: mouseDownPos.y,
+          x2: e.clientX,
+          y2: e.clientY
+        });
+      } else {
+        setDragSelection(null);
+      }
+    };
+
     const handleMouseUp = (e: MouseEvent) => {
-      isMouseDown = false;
-      mouseUpPos.x = e.clientX;
-      mouseUpPos.y = e.clientY;
+      if (e.button === 0) {
+        // --- LEFT CLICK RELEASE (Selection block) ---
+        isMouseDown = false;
+        setDragSelection(null);
+        mouseUpPos.x = e.clientX;
+        mouseUpPos.y = e.clientY;
 
-      const deltaX = Math.abs(mouseUpPos.x - mouseDownPos.x);
-      const deltaY = Math.abs(mouseUpPos.y - mouseDownPos.y);
+        const deltaX = Math.abs(mouseUpPos.x - mouseDownPos.x);
+        const deltaY = Math.abs(mouseUpPos.y - mouseDownPos.y);
 
-      // Simple Click Selection (vs drag box selector)
-      if (deltaX < 6 && deltaY < 6) {
-        // Compute intersected elements
+        if (deltaX < 6 && deltaY < 6) {
+          // Simple click selection
+          const bounds = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((e.clientX - bounds.left) / bounds.width) * 2 - 1;
+          mouse.y = -((e.clientY - bounds.top) / bounds.height) * 2 + 1;
+
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObject(terrainMesh);
+
+          if (intersects.length > 0) {
+            const pt = intersects[0].point;
+            const mapX = Math.round(pt.x);
+            const mapZ = Math.round(pt.z);
+
+            // If currently planning to place a building structure
+            if (sim.buildingToPlace) {
+              triggerConstructionAction(sim.buildingToPlace, mapX, mapZ);
+              return;
+            }
+
+            // If currently planning to trigger a Commander Strike power
+            if (sim.commandStrikeActive) {
+              triggerCommandStrikeAction(mapX, mapZ);
+              return;
+            }
+
+            // Select player entities underneath cursor
+            const hitEntity = findEntityAt(pt.x, pt.z, 2.0);
+            if (hitEntity && hitEntity.playerId === playerId) {
+              sim.selectedIds = [hitEntity.id];
+              sound.playSelect();
+            } else {
+              sim.selectedIds = []; // clicked plain terrain
+            }
+          }
+        } else {
+          // Multi-Selecting Box sweep finished
+          handleDragSelection(mouseDownPos, mouseUpPos);
+        }
+      } else if (e.button === 2) {
+        // --- RIGHT CLICK RELEASE (Command & Cancel block) ---
+        e.preventDefault();
+
+        // 1. Right click cancels active placement state or airstrike state
+        if (sim.buildingToPlace) {
+          sim.buildingToPlace = null;
+          setBuildingToPlace(null);
+          pushNotification('Строительство отменено', 'info');
+          sound.playClick();
+          return;
+        }
+        if (sim.commandStrikeActive) {
+          sim.commandStrikeActive = false;
+          setCommandStrikeActive(false);
+          pushNotification('Удар супероружием отменен', 'info');
+          sound.playClick();
+          return;
+        }
+
+        // 2. Issue movement or combat strikes
         const bounds = renderer.domElement.getBoundingClientRect();
         mouse.x = ((e.clientX - bounds.left) / bounds.width) * 2 - 1;
         mouse.y = -((e.clientY - bounds.top) / bounds.height) * 2 + 1;
@@ -998,53 +1854,24 @@ export default function RTSGameCanvas({
 
         if (intersects.length > 0) {
           const pt = intersects[0].point;
-          const mapX = Math.round(pt.x);
-          const mapZ = Math.round(pt.z);
 
-          // If currently planning to place a building structure
-          if (sim.buildingToPlace) {
-            triggerConstructionAction(sim.buildingToPlace, mapX, mapZ);
-            return;
-          }
-
-          // If currently planning to trigger a Commander Strike power
-          if (sim.commandStrikeActive) {
-            triggerCommandStrikeAction(mapX, mapZ);
-            return;
-          }
-
-          if (e.button === 0) {
-            // Left click: select player entities underneath cursor
-            const hitEntity = findEntityAt(pt.x, pt.z, 2.0);
-            if (hitEntity && hitEntity.playerId === playerId) {
-              sim.selectedIds = [hitEntity.id];
-              sound.playSelect();
+          if (sim.selectedIds.length > 0) {
+            const clickedTarget = findEntityAt(pt.x, pt.z, 2.0);
+            if (clickedTarget && clickedTarget.playerId !== playerId) {
+              // Ordering attack
+              triggerAttackAction(sim.selectedIds, clickedTarget.id, clickedTarget.type);
             } else {
-              sim.selectedIds = []; // clicked plain terrain
-            }
-          } else if (e.button === 2) {
-            // Right click: issue order to selected squad!
-            if (sim.selectedIds.length > 0) {
-              const clickedTarget = findEntityAt(pt.x, pt.z, 2.0);
-              if (clickedTarget && clickedTarget.playerId !== playerId) {
-                // Ordering attack
-                triggerAttackAction(sim.selectedIds, clickedTarget.id, clickedTarget.type);
-              } else {
-                // Ordering movement
-                triggerMovementAction(sim.selectedIds, pt.x, pt.z);
+              // Ordering movement
+              triggerMovementAction(sim.selectedIds, pt.x, pt.z);
 
-                // Show flashing destination beacon momentarily
-                const beaconElev = getTerrainHeight(pt.x, pt.z, map);
-                beaconMesh.position.set(pt.x, beaconElev + 0.15, pt.z);
-                beaconMesh.visible = true;
-                setTimeout(() => { beaconMesh.visible = false; }, 850);
-              }
+              // Show flashing destination beacon momentarily
+              const beaconElev = getTerrainHeight(pt.x, pt.z, map);
+              beaconMesh.position.set(pt.x, beaconElev + 0.15, pt.z);
+              beaconMesh.visible = true;
+              setTimeout(() => { beaconMesh.visible = false; }, 850);
             }
           }
         }
-      } else {
-        // Multi-Selecting Box sweep finished
-        handleDragSelection(mouseDownPos, mouseUpPos);
       }
     };
 
@@ -1432,6 +2259,7 @@ export default function RTSGameCanvas({
 
     const canvasDom = renderer.domElement;
     canvasDom.addEventListener('mousedown', handleMouseDown);
+    canvasDom.addEventListener('mousemove', handleMouseMoveSelection);
     canvasDom.addEventListener('mouseup', handleMouseUp);
     canvasDom.addEventListener('contextmenu', (e) => e.preventDefault()); // Stop native popup right clicks
 
@@ -1515,10 +2343,33 @@ export default function RTSGameCanvas({
           entityMeshes.set(ent.id, mesh);
         }
 
+        // Soft separation push logic for active physical vehicles / infantry
+        const isDrone = ent.type === 'unit' && ent.subType.includes('drone');
+        if (ent.type === 'unit' && ent.state !== 'dead' && !isDrone) {
+          sim.entities.forEach(other => {
+            if (other.id === ent.id || other.state === 'dead' || other.type !== 'unit' || other.subType.includes('drone')) return;
+            const dx = ent.x - other.x;
+            const dz = ent.z - other.z;
+            const distSq = dx * dx + dz * dz;
+            const minSpace = 1.35;
+            const minSpaceSq = minSpace * minSpace;
+            if (distSq < minSpaceSq) {
+              const dist = Math.sqrt(distSq) || 0.01;
+              const overlap = minSpace - dist;
+              const pushX = (dx / dist) * overlap * 0.08;
+              const pushZ = (dz / dist) * overlap * 0.08;
+              ent.x += pushX;
+              ent.z += pushZ;
+            }
+          });
+          // Constrain within map bounds
+          ent.x = Math.max(1, Math.min(lobby.mapSize - 1.5, ent.x));
+          ent.z = Math.max(1, Math.min(lobby.mapSize - 1.5, ent.z));
+        }
+
         // CRITICAL GROUND CLAMP PROTOCOL: Lock 3D physical position to terrain heights on every frame tick!
         // Guarantees all vehicles, infantry, and structures glide over slopes correctly without sinking.
         const currentElevation = getTerrainHeight(ent.x, ent.z, map);
-        const isDrone = ent.type === 'unit' && ent.subType.includes('drone');
         
         let visualY = currentElevation + 0.05;
         if (isDrone) {
@@ -1528,8 +2379,66 @@ export default function RTSGameCanvas({
         }
 
         mesh.position.set(ent.x, visualY, ent.z);
+
+        // Mobile Jammer stealth field transparency application
+        const isCloaked = ent.type === 'unit' && ent.subType !== 'mobile_jammer' && sim.entities.some(j => 
+          j.state !== 'dead' &&
+          j.subType === 'mobile_jammer' &&
+          j.playerId === ent.playerId &&
+          Math.sqrt((j.x - ent.x)*(j.x - ent.x) + (j.z - ent.z)*(j.z - ent.z)) < 8.0
+        );
+
+        mesh.traverse(child => {
+          if ((child as THREE.Mesh).isMesh) {
+            const m = (child as THREE.Mesh).material as THREE.Material | THREE.Material[];
+            const mats = Array.isArray(m) ? m : [m];
+            mats.forEach(mat => {
+              mat.transparent = true;
+              mat.opacity = isCloaked ? 0.35 : 1.0;
+            });
+          }
+        });
+
+        // Rotate and smoothly tilt units along terrain slope
         if (ent.type === 'unit') {
+          mesh.rotation.order = 'YXZ';
           mesh.rotation.y = ent.angle;
+
+          if (!isDrone) {
+            const stepForward = 0.5;
+            const angleVal = -ent.angle + Math.PI / 2;
+            
+            const fX = ent.x + Math.cos(angleVal) * stepForward;
+            const fZ = ent.z + Math.sin(angleVal) * stepForward;
+            const bX = ent.x - Math.cos(angleVal) * stepForward;
+            const bZ = ent.z - Math.sin(angleVal) * stepForward;
+
+            const heightFront = getTerrainHeight(fX, fZ, map);
+            const heightBack = getTerrainHeight(bX, bZ, map);
+                        const pitch = -Math.atan2(heightFront - heightBack, stepForward * 2);
+
+            const perpAngle = angleVal + Math.PI / 2;
+            const lX = ent.x + Math.cos(perpAngle) * stepForward;
+            const lZ = ent.z + Math.sin(perpAngle) * stepForward;
+            const rX = ent.x - Math.cos(perpAngle) * stepForward;
+            const rZ = ent.z - Math.sin(perpAngle) * stepForward;
+
+            const heightLeft = getTerrainHeight(lX, lZ, map);
+            const heightRight = getTerrainHeight(rX, rZ, map);
+            const roll = -Math.atan2(heightLeft - heightRight, stepForward * 2);
+
+            if (ent.pitch === undefined) ent.pitch = 0;
+            if (ent.roll === undefined) ent.roll = 0;
+
+            ent.pitch += (pitch - ent.pitch) * 0.15;
+            ent.roll += (roll - ent.roll) * 0.15;
+
+            mesh.rotation.x = ent.pitch;
+            mesh.rotation.z = ent.roll;
+          } else {
+            mesh.rotation.x = 0;
+            mesh.rotation.z = 0;
+          }
         }
 
         // Visual entity highlights for user selections
@@ -1563,6 +2472,25 @@ export default function RTSGameCanvas({
           if (prop) prop.rotation.z += 0.5;
         }
 
+        // Faction-tailored real-time mechanical animations
+        const ewAntenna = mesh.getObjectByName('ew_antenna');
+        if (ewAntenna) {
+          ewAntenna.rotation.y += 0.04;
+        }
+        const spinDish = mesh.getObjectByName('radar_dish');
+        if (spinDish) {
+          spinDish.rotation.y += 0.02;
+        }
+        const floatingCrys = mesh.getObjectByName('floating_crys');
+        if (floatingCrys) {
+          floatingCrys.rotation.y += 0.03;
+          floatingCrys.position.y = Math.sin(Date.now() * 0.003) * 0.12;
+        }
+        const pumpArm = mesh.getObjectByName('pump_arm');
+        if (pumpArm) {
+          pumpArm.rotation.z = Math.sin(Date.now() * 0.002) * 0.35;
+        }
+
         // Building construction update ticks
         if (ent.type === 'building' && ent.state === 'constructing') {
           ent.buildProgress = (ent.buildProgress || 0) + 0.0015; // smooth delta
@@ -1583,7 +2511,35 @@ export default function RTSGameCanvas({
 
           const maxSp = getUnitProps(ent.subType as UnitType, ent.playerId, sim.players).speed * 0.08;
 
-          if (dist > 0.4) {
+          // Dynamic group grouping/stopping: stop next to other resting units at the target
+          let dynamicStopRadius = 0.44;
+          if (!ent.subType.includes('drone')) {
+            const staticTeammatesAtTarget = sim.entities.filter(other => 
+              other.id !== ent.id &&
+              other.type === 'unit' &&
+              other.playerId === ent.playerId &&
+              !other.subType.includes('drone') &&
+              (other.state === 'idle' || other.state === 'attacking') &&
+              other.targetX === ent.targetX &&
+              other.targetZ === ent.targetZ
+            );
+            for (const other of staticTeammatesAtTarget) {
+              const dxO = ent.targetX! - other.x;
+              const dzO = ent.targetZ! - other.z;
+              const dO = Math.sqrt(dxO*dxO + dzO*dzO);
+              if (dO < 2.5) {
+                const dxU = ent.x - other.x;
+                const dzU = ent.z - other.z;
+                const dU = Math.sqrt(dxU*dxU + dzU*dzU);
+                if (dU < 1.45) {
+                  dynamicStopRadius = Math.max(dynamicStopRadius, dist);
+                  break;
+                }
+              }
+            }
+          }
+
+          if (dist > dynamicStopRadius) {
             // Apply step toward target
             const angleVal = Math.atan2(dz, dx);
             ent.angle = -angleVal + Math.PI / 2; // rotating mesh face
@@ -1611,7 +2567,18 @@ export default function RTSGameCanvas({
           
           sim.entities.forEach(v => {
             if (v.state === 'dead' || v.team === ent.team) return;
+            
+            // Jamming stealth support: if targeted entity is cloaked under an active Mobile Jammer, we cannot target it unless we are directly beside it
+            const isTargetCloaked = v.type === 'unit' && v.subType !== 'mobile_jammer' && sim.entities.some(j => 
+              j.state !== 'dead' &&
+              j.subType === 'mobile_jammer' &&
+              j.playerId === v.playerId &&
+              Math.sqrt((j.x - v.x)*(j.x - v.x) + (j.z - v.z)*(j.z - v.z)) < 8.0
+            );
+
             const dist = Math.sqrt((v.x - ent.x) * (v.x - ent.x) + (v.z - ent.z) * (v.z - ent.z));
+            if (isTargetCloaked && dist > 2.8) return; // Stealth lock!
+
             if (dist < minRange) {
               minRange = dist;
               closestHostile = v;
@@ -1654,7 +2621,21 @@ export default function RTSGameCanvas({
               mesh.position.set(ent.x, visualHeight, ent.z);
             } else {
               // Target is securely in range, weapon systems free!
-              if (!ent.cooldown || ent.cooldown <= 0) {
+              const isJammed = sim.entities.some(v => 
+                v.state !== 'dead' &&
+                v.subType === 'mobile_jammer' &&
+                v.team !== ent.team &&
+                Math.sqrt((v.x - ent.x)*(v.x - ent.x) + (v.z - ent.z)*(v.z - ent.z)) < 11.0
+              );
+
+              if (isJammed) {
+                ent.cooldown = 15; // stall firing
+                const startHeight = mesh.position.y + 0.4;
+                const spar = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: '#22d3ee' }));
+                spar.position.set(ent.x + (Math.random()-0.5)*0.3, startHeight, ent.z + (Math.random()-0.5)*0.3);
+                scene.add(spar);
+                explosionParticles.push({ mesh: spar, stepY: 0.05, life: 0.15, sizeShrink: 0.85 });
+              } else if (!ent.cooldown || ent.cooldown <= 0) {
                 ent.cooldown = 45; // default loop rate limit
 
                 if (ent.subType === 'drone_kamikaze') {
@@ -1743,10 +2724,15 @@ export default function RTSGameCanvas({
                   ownerId: owner.id
                 });
 
-                if (pType === 'machinegun') {
-                  sound.playGunshot();
-                } else {
-                  sound.playLaunch();
+                const entFaction = getFaction(ent.playerId, sim.players);
+                if (entFaction === 'Alliance') {
+                  sound.playAllianceZap();
+                } else if (entFaction === 'Coalition') {
+                  sound.playCoalitionBoom();
+                } else if (entFaction === 'Union') {
+                  sound.playUnionTesla();
+                } else { // Syndicate
+                  sound.playSyndicateAcid();
                 }
               }
             }
@@ -1755,31 +2741,57 @@ export default function RTSGameCanvas({
 
         // Automated Laser Turret Point Defense target acquisitions
         if (ent.subType === 'defense_turret' && ent.state !== 'constructing') {
-          // Look for closest hostile within weapon radius
-          let closestHostile: GameEntity | null = null;
-          let minRange = 7.5; // active radius
-
-          sim.entities.forEach(v => {
-            if (v.state === 'dead' || v.team === ent.team) return;
-            const dist = Math.sqrt((v.x - ent.x) * (v.x - ent.x) + (v.z - ent.z) * (v.z - ent.z));
-            if (dist < minRange) {
-              minRange = dist;
-              closestHostile = v;
-            }
-          });
-
-          if (closestHostile) {
+          // Check if jammed by any active mobile_jammer from an enemy team!
+          const activeJammerNearby = sim.entities.some(v => 
+            v.state !== 'dead' && 
+            v.subType === 'mobile_jammer' && 
+            v.team !== ent.team && 
+            Math.sqrt((v.x - ent.x)*(v.x - ent.x) + (v.z - ent.z)*(v.z - ent.z)) < 11.0
+          );
+          
+          if (activeJammerNearby) {
+            ent.cooldown = 20; // force lock firing capability
             const hBlock = mesh.getObjectByName('railgun_head');
-            const target: GameEntity = closestHostile;
-            const dx = target.x - ent.x;
-            const dz = target.z - ent.z;
-            const angleVal = Math.atan2(dz, dx);
-            
             if (hBlock) {
-              hBlock.rotation.y = -angleVal - Math.PI / 2; // sweep head
+              hBlock.rotation.y += 0.12; // spin head in confusion
             }
+          } else {
+            // Look for closest hostile within weapon radius
+            let closestHostile: GameEntity | null = null;
+            let minRange = 7.5; // active radius
 
-            if (!ent.cooldown || ent.cooldown <= 0) {
+            sim.entities.forEach(v => {
+              if (v.state === 'dead' || v.team === ent.team) return;
+
+              // Jet/vehicle cloaked shield guard checks
+              const isTargetCloaked = v.type === 'unit' && v.subType !== 'mobile_jammer' && sim.entities.some(j => 
+                j.state !== 'dead' &&
+                j.subType === 'mobile_jammer' &&
+                j.playerId === v.playerId &&
+                Math.sqrt((j.x - v.x)*(j.x - v.x) + (j.z - v.z)*(j.z - v.z)) < 8.0
+              );
+
+              const dist = Math.sqrt((v.x - ent.x) * (v.x - ent.x) + (v.z - ent.z) * (v.z - ent.z));
+              if (isTargetCloaked && dist > 2.8) return; // Cloak blocks lock-on except point-blank detection sweeps!
+
+              if (dist < minRange) {
+                minRange = dist;
+                closestHostile = v;
+              }
+            });
+
+            if (closestHostile) {
+              const hBlock = mesh.getObjectByName('railgun_head');
+              const target: GameEntity = closestHostile;
+              const dx = target.x - ent.x;
+              const dz = target.z - ent.z;
+              const angleVal = Math.atan2(dz, dx);
+              
+              if (hBlock) {
+                hBlock.rotation.y = -angleVal + Math.PI / 2; // sweep head (corrected 180 deg)
+              }
+
+              if (!ent.cooldown || ent.cooldown <= 0) {
               ent.cooldown = 20;
 
               const owner = sim.players.find(p => p.id === ent.playerId) || selfPlayer;
@@ -1818,8 +2830,18 @@ export default function RTSGameCanvas({
                   ownerId: owner.id
               });
 
-              sound.playLaser();
+              const turFaction = getFaction(ent.playerId, sim.players);
+              if (turFaction === 'Alliance') {
+                sound.playAllianceZap();
+              } else if (turFaction === 'Coalition') {
+                sound.playCoalitionBoom();
+              } else if (turFaction === 'Union') {
+                sound.playUnionTesla();
+              } else { // Syndicate
+                sound.playSyndicateAcid();
+              }
             }
+            } // close if (!ent.cooldown
           }
         }
       });
@@ -2279,6 +3301,7 @@ export default function RTSGameCanvas({
       cancelAnimationFrame(animationId);
       window.removeEventListener('resize', handleResize);
       canvasDom.removeEventListener('mousedown', handleMouseDown);
+      canvasDom.removeEventListener('mousemove', handleMouseMoveSelection);
       canvasDom.removeEventListener('mouseup', handleMouseUp);
       if (socketRef.current) {
         socketRef.current.removeEventListener('message', handleSocketMessage);
@@ -2380,7 +3403,7 @@ export default function RTSGameCanvas({
 
     const sim = simulationRef.current;
     sim.camX = px * lobby.mapSize;
-    sim.camZ = pz * lobby.mapSize;
+    sim.camZ = (1 - pz) * lobby.mapSize; // vertical flip match
     sound.playClick();
   };
 
@@ -2388,6 +3411,19 @@ export default function RTSGameCanvas({
     <div className="h-screen w-screen bg-[#070b0e] text-slate-100 flex flex-col relative select-none font-sans overflow-hidden">
       {/* 3D Viewport container */}
       <div ref={mountRef} className="flex-1 w-full h-full cursor-crosshair relative" />
+
+      {/* Visible drag selection box overlay */}
+      {dragSelection && (
+        <div
+          className="absolute border border-cyan-400 bg-cyan-400/15 pointer-events-none z-50 rounded"
+          style={{
+            left: Math.min(dragSelection.x1, dragSelection.x2),
+            top: Math.min(dragSelection.y1, dragSelection.y2),
+            width: Math.abs(dragSelection.x2 - dragSelection.x1),
+            height: Math.abs(dragSelection.y2 - dragSelection.y1),
+          }}
+        />
+      )}
 
       {/* Top HUD Controls Panel bar */}
       <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none z-20">
@@ -2459,7 +3495,7 @@ export default function RTSGameCanvas({
                 className="absolute w-2 h-2 bg-yellow-500 rounded-full border border-black animate-pulse"
                 style={{
                   left: `${(spot.x / lobby.mapSize) * 100}%`,
-                  top: `${(spot.z / lobby.mapSize) * 100}%`,
+                  top: `${(1 - spot.z / lobby.mapSize) * 100}%`,
                   transform: 'translate(-50%, -50%)'
                 }}
               />
@@ -2468,7 +3504,20 @@ export default function RTSGameCanvas({
             {/* Active player HQ hubs dots representing base zones */}
             {simulationRef.current.entities.map(ent => {
               if (ent.state === 'dead') return null;
+              
               const owner = simulationRef.current.players.find(p => p.id === ent.playerId) || selfPlayer;
+              const isFriendly = ent.playerId === playerId;
+
+              // Hide enemy units that are cloaked under a Mobile Jammer
+              const isTargetCloaked = ent.type === 'unit' && ent.subType !== 'mobile_jammer' && simulationRef.current.entities.some(j => 
+                j.state !== 'dead' &&
+                j.subType === 'mobile_jammer' &&
+                j.playerId === ent.playerId &&
+                Math.sqrt((j.x - ent.x)*(j.x - ent.x) + (j.z - ent.z)*(j.z - ent.z)) < 8.0
+              );
+
+              if (isTargetCloaked && !isFriendly) return null;
+
               return (
                 <div
                   key={ent.id}
@@ -2476,7 +3525,7 @@ export default function RTSGameCanvas({
                   style={{
                     backgroundColor: owner.color,
                     left: `${(ent.x / lobby.mapSize) * 100}%`,
-                    top: `${(ent.z / lobby.mapSize) * 100}%`,
+                    top: `${(1 - ent.z / lobby.mapSize) * 100}%`,
                     transform: 'translate(-50%, -50%)'
                   }}
                 />
