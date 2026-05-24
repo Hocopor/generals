@@ -4,7 +4,7 @@ import { Faction, Lobby, Player, GameEntity, BuildingType, UnitType, GameActionE
 import { sound } from '../utils/audio';
 import { generateProceduralMap, GeneratedMap, MapNode } from '../utils/mapGenerator';
 import { getFactionUnitProperties, getFactionBuildingProperties } from '../utils/factionProperties';
-import { Shield, Zap, Sparkles, Swords, Play, Compass, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Shield, Zap, Sparkles, Swords, Play, Compass, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface RTSGameCanvasProps {
   lobby: Lobby;
@@ -23,16 +23,20 @@ const UNIT_PROPERTIES: Record<UnitType, { name: string; hp: number; speed: numbe
   cyber_specops: { name: 'Спецназ ССО', hp: 80, speed: 1.4, range: 4.5, dps: 18, cost: 250, desc: 'Элитная пехота. Может захватывать нефтяные вышки.' },
   precision_tank: { name: 'Лазерный Танк', hp: 260, speed: 1.1, range: 6.0, dps: 24, cost: 500, desc: 'Основная боевая машина. Высокая броня и прочность.' },
   artillery_mlrs: { name: 'РСЗО Торнадо', hp: 130, speed: 0.8, range: 11.0, dps: 45, cost: 650, desc: 'Тяжелая ракетная артиллерия дальнего боя. Осадный специалист.' },
-  mobile_jammer: { name: 'РЭБ Глушитель', hp: 160, speed: 1.3, range: 0, dps: 0, cost: 400, desc: 'Отключает вражеские турели и маскирует союзников поблизости.' }
+  mobile_jammer: { name: 'РЭБ Глушитель', hp: 160, speed: 1.3, range: 0, dps: 0, cost: 400, desc: 'Отключает вражеские турели и маскирует союзников поблизости.' },
+  builder: { name: 'Юнит-Строитель', hp: 120, speed: 1.3, range: 0, dps: 0, cost: 150, desc: 'Инженерно-строительный комплекс. Строит все типы зданий на поле.' },
+  harvester: { name: 'Сборщик Ресурсов', hp: 180, speed: 1.4, range: 0, dps: 0, cost: 280, desc: 'Логистический грузовик. Доставляет сырьё с нефтевышек на базу.' }
 };
 
 const BUILDING_PROPERTIES: Record<BuildingType, { name: string; hp: number; cost: number; power: number; desc: string }> = {
-  command_center: { name: 'Штаб Командования', hp: 1500, cost: 1200, power: 30, desc: 'Главная база. Генерирует бюджет и обеспечивает работу радара.' },
+  command_center: { name: 'Штаб Командования', hp: 1500, cost: 1200, power: 30, desc: 'Главная база. Генерирует постоянный доход и позволяет обучать Строителей.' },
   power_plant: { name: 'Электростанция', hp: 500, cost: 300, power: 100, desc: 'Вырабатывает энергию для обеспечения работы баз.' },
-  supply_refinery: { name: 'Нефтевышка', hp: 800, cost: 400, power: -20, desc: 'Размещается на нефтяных точках для добычи ресурсов и пополнения бюджета.' },
+  supply_refinery: { name: 'Центр Снабжения', hp: 800, cost: 400, power: -20, desc: 'Станция сбора ресурсов. Разгружает прибывающие логистические грузовики.' },
   barracks: { name: 'Казармы Дронов', hp: 600, cost: 350, power: -15, desc: 'Обучает ССО и производит тактические беспилотники.' },
   war_factory: { name: 'Военный Завод', hp: 850, cost: 600, power: -25, desc: 'Строит наземную технику: танки, артиллерию и машины РЭБ.' },
-  defense_turret: { name: 'Лазерная Турель', hp: 700, cost: 350, power: -20, desc: 'Автоматическая оборонительная турель против наземных и воздушных целей.' }
+  defense_turret: { name: 'Лазерная Турель', hp: 700, cost: 350, power: -20, desc: 'Автоматическая оборонительная турель против наземных и воздушных целей.' },
+  oil_derrick: { name: 'Нефтевышка', hp: 600, cost: 300, power: -10, desc: 'Строится на поле инженером. Позволяет постоянно качать ресурсы.' },
+  civilian_building: { name: 'Городское Здание', hp: 1500, cost: 0, power: 0, desc: 'Нейтральное строение на поле боя. Подходит для защиты и ведения огня пехотой.' }
 };
 
 function getFaction(playerId: string, players: Player[]): Faction {
@@ -100,6 +104,12 @@ export default function RTSGameCanvas({
   const [commandStrikeActive, setCommandStrikeActive] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: 'info' | 'warn' | 'success' }[]>([]);
 
+  // Viewport mapping and collapsible state HUD options
+  const [camPos, setCamPos] = useState({ x: 30, z: 30, zoom: 30 });
+  const [isMenuCollapsed, setIsMenuCollapsed] = useState<boolean>(false);
+  const [hoveredItem, setHoveredItem] = useState<{ type: 'unit' | 'building'; key: string } | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState<boolean>(false);
+
   // Internal simulated references (for THREE.js loop connection)
   const simulationRef = useRef<{
     entities: GameEntity[];
@@ -155,6 +165,18 @@ export default function RTSGameCanvas({
     setNotifications(prev => [{ id, text, type }, ...prev].slice(0, 5));
     if (type === 'warn') sound.playAlert();
   };
+
+  // 2-second hover tooltip timer watcher
+  useEffect(() => {
+    if (!hoveredItem) {
+      setTooltipVisible(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setTooltipVisible(true);
+    }, 2000); // exact 2 seconds hover delay as specified!
+    return () => clearTimeout(timer);
+  }, [hoveredItem]);
 
   // Setup initial player lists (human + dynamic computer AI profiles)
   useEffect(() => {
@@ -1222,6 +1244,130 @@ export default function RTSGameCanvas({
 
             g.add(headRotGroupNode);
           }
+
+        } else if (ent.subType === 'oil_derrick') {
+          // Robust Industrial oil pumping derrick frame with fully automated walking beam
+          const baseTruss = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.2, 0.65, 1.3, 4),
+            new THREE.MeshStandardMaterial({ color: '#1e293b', metalness: 0.8, roughness: 0.3 })
+          );
+          baseTruss.position.y = 0.65;
+          baseTruss.castShadow = true;
+          baseTruss.receiveShadow = true;
+          g.add(baseTruss);
+
+          // Support neck joints
+          const beamPivotJoint = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.08, 0.08, 0.4),
+            structuralHull
+          );
+          beamPivotJoint.rotation.x = Math.PI/2;
+          beamPivotJoint.position.set(0, 1.25, 0);
+          g.add(beamPivotJoint);
+
+          // Walking beam named 'pump_arm' for automatic sin tilt vibrations!
+          const walkingBeamGroup = new THREE.Group();
+          walkingBeamGroup.name = 'pump_arm';
+          walkingBeamGroup.position.set(0, 1.25, 0); // pivot centered on joint
+
+          const mainArmBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(0.15, 0.14, 1.6),
+            new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.7, roughness: 0.4 })
+          );
+          mainArmBeam.position.set(0, 0, 0.2); // offset along Z so it pivots appropriately
+          walkingBeamGroup.add(mainArmBeam);
+
+          // Hammer counterweight Horsehead
+          const horseHeadBox = new THREE.Mesh(
+            new THREE.BoxGeometry(0.22, 0.45, 0.22),
+            glowingCore
+          );
+          horseHeadBox.position.set(0, 0.05, 1.0);
+          walkingBeamGroup.add(horseHeadBox);
+
+          // Sucker rod link connecting to the ground
+          const suckerThinCyl = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.012, 0.012, 1.1),
+            new THREE.MeshStandardMaterial({ color: '#94a3b8', rawRefReference: true } as any)
+          );
+          suckerThinCyl.position.set(0, -0.5, 1.0);
+          walkingBeamGroup.add(suckerThinCyl);
+
+          g.add(walkingBeamGroup);
+
+          // Big heavy raw petroleum storage tank container near the foundation
+          const fuelTankDrum = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.4, 0.4, 0.65, 12),
+            structuralHull
+          );
+          fuelTankDrum.position.set(0.65, 0.32, -0.6);
+          fuelTankDrum.rotation.z = Math.PI / 2;
+          g.add(fuelTankDrum);
+
+          // Little warning light signal indicator
+          const warningL = new THREE.Mesh(
+            new THREE.SphereGeometry(0.08, 6, 6),
+            new THREE.MeshBasicMaterial({ color: '#ef4444' })
+          );
+          warningL.position.set(-0.35, 1.35, -0.35);
+          g.add(warningL);
+
+        } else if (ent.subType === 'civilian_building') {
+          // High-density neutral urban skyscraper optimized for infantry garrisons
+          const skyBlock = new THREE.Mesh(
+            new THREE.BoxGeometry(1.65, 2.7, 1.65),
+            new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.5, metalness: 0.2 })
+          );
+          skyBlock.position.y = 1.35;
+          skyBlock.castShadow = true;
+          skyBlock.receiveShadow = true;
+          g.add(skyBlock);
+
+          // Symmetrical rows of dark glass windows that light up inside!
+          const windowMat = new THREE.MeshBasicMaterial({ color: '#eab308' }); // warm cozy lit window yellow
+          for (let floor = 0; floor < 4; floor++) {
+            const hCoord = 0.45 + floor * 0.62;
+            
+            // Front face windows
+            const frontW1 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.2, 0.03), windowMat);
+            frontW1.position.set(-0.45, hCoord, 0.84);
+            g.add(frontW1);
+
+            const frontW2 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.2, 0.03), windowMat);
+            frontW2.position.set(0.45, hCoord, 0.84);
+            g.add(frontW2);
+
+            // Left side face windows
+            const sideW1 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.2, 0.25), windowMat);
+            sideW1.position.set(-0.84, hCoord, -0.4);
+            g.add(sideW1);
+
+            const sideW2 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.2, 0.25), windowMat);
+            sideW2.position.set(-0.84, hCoord, 0.4);
+            g.add(sideW2);
+          }
+
+          // Modern high-impact communication aerial rooftop frame on top of skyscraper
+          const supportDomeNode = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.5, 0.65, 0.15, 8),
+            structuralHull
+          );
+          supportDomeNode.position.y = 2.76;
+          g.add(supportDomeNode);
+
+          const transmitterPin = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.015, 0.015, 0.85),
+            new THREE.MeshStandardMaterial({ color: '#f1f5f9', metalness: 0.9 })
+          );
+          transmitterPin.position.set(0, 3.2, 0);
+          g.add(transmitterPin);
+
+          const bulbGlow = new THREE.Mesh(
+            new THREE.SphereGeometry(0.07, 6, 6),
+            new THREE.MeshBasicMaterial({ color: '#ef4444' }) // ruby aviation signal beacon
+          );
+          bulbGlow.position.set(0, 3.65, 0);
+          g.add(bulbGlow);
         }
 
       } else {
@@ -1681,6 +1827,134 @@ export default function RTSGameCanvas({
             protectiveOrbClaws2.rotation.z = 0.3;
             g.add(protectiveOrbClaws2);
           }
+
+        } else if (ent.subType === 'builder') {
+          // Modern versatile engineering repair & construction chassis
+          const heavyChassis = new THREE.Mesh(
+            new THREE.BoxGeometry(0.95, 0.38, 1.45),
+            vehicleHull
+          );
+          heavyChassis.position.y = 0.19;
+          heavyChassis.castShadow = true;
+          heavyChassis.receiveShadow = true;
+          g.add(heavyChassis);
+
+          // Faction specific cabin aesthetics
+          const frontBumper = new THREE.Mesh(
+            new THREE.BoxGeometry(1.05, 0.2, 0.3),
+            dynamicCoating
+          );
+          frontBumper.position.set(0, 0.12, 0.62);
+          g.add(frontBumper);
+
+          // 3-Segment Articulated Crane boom/welding laser arm
+          const craneBaseJoint = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.18, 0.18, 0.15),
+            structuralHull
+          );
+          craneBaseJoint.position.set(0, 0.45, -0.2);
+          g.add(craneBaseJoint);
+
+          const mainCraneArm = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 0.1, 0.75),
+            structuralHull
+          );
+          mainCraneArm.rotation.x = -Math.PI / 4;
+          mainCraneArm.position.set(0, 0.68, -0.38);
+          g.add(mainCraneArm);
+
+          const secondaryExtender = new THREE.Mesh(
+            new THREE.BoxGeometry(0.07, 0.07, 0.6),
+            new THREE.MeshStandardMaterial({ color: '#64748b', metalness: 0.9 })
+          );
+          secondaryExtender.rotation.x = Math.PI / 6;
+          secondaryExtender.position.set(0, 0.95, -0.22);
+          g.add(secondaryExtender);
+
+          // High definition laser emitter node
+          const laserDiodLens = new THREE.Mesh(
+            new THREE.SphereGeometry(0.09, 6, 6),
+            glowingCore
+          );
+          laserDiodLens.position.set(0, 1.1, -0.05);
+          g.add(laserDiodLens);
+
+          // Sturdy wheels / tracks
+          for (let side = -1; side <= 1; side += 2) {
+            for (let trackIdx = -1; trackIdx <= 1; trackIdx++) {
+              const wheelCyl = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.2, 0.2, 0.14, 8),
+                new THREE.MeshStandardMaterial({ color: '#111827', roughness: 0.9 })
+              );
+              wheelCyl.rotation.z = Math.PI / 2;
+              wheelCyl.position.set(side * 0.54, 0.1, trackIdx * 0.45);
+              g.add(wheelCyl);
+            }
+          }
+
+        } else if (ent.subType === 'harvester') {
+          // Double-cylinder high payload raw petroleum resource logistics carrier
+          const carrierTruckBed = new THREE.Mesh(
+            new THREE.BoxGeometry(1.15, 0.28, 1.9),
+            vehicleHull
+          );
+          carrierTruckBed.position.y = 0.14;
+          carrierTruckBed.castShadow = true;
+          carrierTruckBed.receiveShadow = true;
+          g.add(carrierTruckBed);
+
+          // Armored Forward Driver Cabin with glowing windows
+          const driverCab = new THREE.Mesh(
+            new THREE.BoxGeometry(1.05, 0.58, 0.65),
+            structuralHull
+          );
+          driverCab.position.set(0, 0.5, 0.65);
+          g.add(driverCab);
+
+          const glassShield = new THREE.Mesh(
+            new THREE.BoxGeometry(0.9, 0.22, 0.03),
+            glowingCore
+          );
+          glassShield.position.set(0, 0.55, 0.98);
+          g.add(glassShield);
+
+          // Giant cylindrical heavy duty storage refinery tanks on the back!
+          const tankLeft = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.35, 0.35, 1.1, 10),
+            new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.9, roughness: 0.1 })
+          );
+          tankLeft.rotation.x = Math.PI/2;
+          tankLeft.position.set(-0.3, 0.44, -0.25);
+          g.add(tankLeft);
+
+          const tankRight = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.35, 0.35, 1.1, 10),
+            new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.9, roughness: 0.1 })
+          );
+          tankRight.rotation.x = Math.PI/2;
+          tankRight.position.set(0.3, 0.44, -0.25);
+          g.add(tankRight);
+
+          // Spinny flashing hazard orange beacon on truck head
+          const warningDome = new THREE.Mesh(
+            new THREE.SphereGeometry(0.08, 6, 6),
+            new THREE.MeshBasicMaterial({ color: '#fbbf24' })
+          );
+          warningDome.position.set(0, 0.82, 0.55);
+          g.add(warningDome);
+
+          // Heavy offroad dual wheel sets
+          for (let side = -1; side <= 1; side += 2) {
+            for (let wIdx = -1.2; wIdx <= 1.2; wIdx += 0.8) {
+              const wheelT = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.22, 0.22, 0.18, 8),
+                new THREE.MeshStandardMaterial({ color: '#020617', roughness: 0.95 })
+              );
+              wheelT.rotation.z = Math.PI / 2;
+              wheelT.position.set(side * 0.62, 0.1, wIdx * 0.48);
+              g.add(wheelT);
+            }
+          }
         }
       }
 
@@ -1997,6 +2271,46 @@ export default function RTSGameCanvas({
         buildProgress: 0.05
       });
 
+      // Automatically task selected or closest friendly Builder units to go construct it
+      const selectedBuilders = sim.entities.filter(ent => 
+        sim.selectedIds.includes(ent.id) && 
+        ent.playerId === playerId && 
+        ent.subType === 'builder' && 
+        ent.state !== 'dead'
+      );
+      if (selectedBuilders.length > 0) {
+        selectedBuilders.forEach(b => {
+          b.state = 'moving';
+          // Move slightly spaced from center
+          b.targetX = x + (Math.random() - 0.5) * 1.5;
+          b.targetZ = z + (Math.random() - 0.5) * 1.5;
+        });
+        pushNotification(`Юнитам-строителям отправлены координаты объекта!`, 'info');
+      } else {
+        const anyBuilders = sim.entities.filter(ent => 
+          ent.playerId === playerId && 
+          ent.subType === 'builder' && 
+          ent.state !== 'dead'
+        );
+        if (anyBuilders.length > 0) {
+          let closestB = anyBuilders[0];
+          let minDistSq = 999999;
+          anyBuilders.forEach(b => {
+            const dSq = (b.x - x)*(b.x - x) + (b.z - z)*(b.z - z);
+            if (dSq < minDistSq) {
+              minDistSq = dSq;
+              closestB = b;
+            }
+          });
+          closestB.state = 'moving';
+          closestB.targetX = x + (Math.random() - 0.5) * 1.5;
+          closestB.targetZ = z + (Math.random() - 0.5) * 1.5;
+          pushNotification(`Ближайший строительный комплекс выдвигается на стройплощадку!`, 'info');
+        } else {
+          pushNotification(`Внимание: Нет свободных Строителей! Закажите инженера в Штабе Командования.`, 'warn');
+        }
+      }
+
       // Relay actions through Websockets
       sendSocketAction(pObj);
 
@@ -2145,6 +2459,85 @@ export default function RTSGameCanvas({
           }
         }
       });
+    }
+
+    // Physical explosion wreckage / debris, shockwave and fire particles
+    function spawnPhysicalExplosionWreckage(x: number, z: number, sizeFactor: number = 1.0) {
+      if (!map) return;
+      const baseElev = getTerrainHeight(x, z, map);
+
+      // 1. Spawning dynamic expanding shockwave ring flat on the ground
+      const ringGeo = new THREE.RingGeometry(0.1, 0.45, 16);
+      const ringMat = new THREE.MeshBasicMaterial({ 
+        color: '#ffffff', 
+        side: THREE.DoubleSide, 
+        transparent: true, 
+        opacity: 0.855 
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.rotation.x = -Math.PI / 2;
+      ringMesh.position.set(x, baseElev + 0.08, z);
+      scene.add(ringMesh);
+
+      explosionParticles.push({
+        mesh: ringMesh,
+        stepY: 0,
+        life: 0.8,
+        isRing: true,
+        sizeShrink: 1.05
+      } as any);
+
+      // 2. Spawning tumbling physical wreckage / debris pieces falling to ground
+      const fragmentMat = new THREE.MeshStandardMaterial({ 
+        color: '#4b5563', 
+        metalness: 0.8, 
+        roughness: 0.3 
+      });
+
+      const piecesCount = Math.floor(Math.random() * 3) + 3;
+      for (let k = 0; k < piecesCount; k++) {
+        const pieceGeo = new THREE.BoxGeometry(0.18 * sizeFactor, 0.12 * sizeFactor, 0.18 * sizeFactor);
+        const pieceMesh = new THREE.Mesh(pieceGeo, fragmentMat);
+        pieceMesh.position.set(
+          x + (Math.random() - 0.5) * 0.4, 
+          baseElev + 0.2, 
+          z + (Math.random() - 0.5) * 0.4
+        );
+        scene.add(pieceMesh);
+
+        explosionParticles.push({
+          mesh: pieceMesh,
+          stepX: (Math.random() - 0.5) * 0.12,
+          stepY: Math.random() * 0.12 + 0.08,
+          stepZ: (Math.random() - 0.5) * 0.12,
+          life: 1.2,
+          hasGravity: true,
+          rotX: (Math.random() - 0.5) * 0.15,
+          rotY: (Math.random() - 0.5) * 0.15,
+        } as any);
+      }
+
+      // 3. Spawning fiery explosion flashes
+      for (let j = 0; j < 6; j++) {
+        const fireMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(Math.random() * 0.35 + 0.15, 6, 6),
+          new THREE.MeshBasicMaterial({ color: '#f97316', transparent: true, opacity: 0.9 })
+        );
+        fireMesh.position.set(
+          x + (Math.random() - 0.5) * 0.3,
+          baseElev + 0.2,
+          z + (Math.random() - 0.5) * 0.3
+        );
+        scene.add(fireMesh);
+        explosionParticles.push({
+          mesh: fireMesh,
+          stepX: (Math.random() - 0.5) * 0.04,
+          stepY: Math.random() * 0.06 + 0.02,
+          stepZ: (Math.random() - 0.5) * 0.04,
+          life: 0.6,
+          sizeShrink: 0.9
+        });
+      }
     }
 
     // Handles inbound Websocket notifications safely
@@ -2305,6 +2698,7 @@ export default function RTSGameCanvas({
           // Remove from mesh scenes
           const mesh = entityMeshes.get(ent.id);
           if (mesh) {
+            spawnPhysicalExplosionWreckage(ent.x, ent.z, ent.type === 'building' ? 2.5 : 1.0);
             scene.remove(mesh);
             entityMeshes.delete(ent.id);
           }
@@ -2345,9 +2739,9 @@ export default function RTSGameCanvas({
 
         // Soft separation push logic for active physical vehicles / infantry
         const isDrone = ent.type === 'unit' && ent.subType.includes('drone');
-        if (ent.type === 'unit' && ent.state !== 'dead' && !isDrone) {
+        if (ent.type === 'unit' && ent.state !== 'dead' && ent.state !== 'garrisoned' && !isDrone) {
           sim.entities.forEach(other => {
-            if (other.id === ent.id || other.state === 'dead' || other.type !== 'unit' || other.subType.includes('drone')) return;
+            if (other.id === ent.id || other.state === 'dead' || other.state === 'garrisoned' || other.type !== 'unit' || other.subType.includes('drone')) return;
             const dx = ent.x - other.x;
             const dz = ent.z - other.z;
             const distSq = dx * dx + dz * dz;
@@ -2378,6 +2772,7 @@ export default function RTSGameCanvas({
           visualY = currentElevation + 0.05;
         }
 
+        mesh.visible = ent.state !== 'garrisoned';
         mesh.position.set(ent.x, visualY, ent.z);
 
         // Mobile Jammer stealth field transparency application
@@ -2493,13 +2888,264 @@ export default function RTSGameCanvas({
 
         // Building construction update ticks
         if (ent.type === 'building' && ent.state === 'constructing') {
-          ent.buildProgress = (ent.buildProgress || 0) + 0.0015; // smooth delta
-          mesh.scale.set(1, ent.buildProgress, 1); // rise above ground
+          // See if any builder belonging to the same player is nearby
+          const builders = sim.entities.filter(b => b.type === 'unit' && b.subType === 'builder' && b.playerId === ent.playerId && b.state !== 'dead');
+          const nearBuilder = builders.find(b => {
+            const dx = b.x - ent.x;
+            const dz = b.z - ent.z;
+            return dx*dx + dz*dz < 20.25; // within 4.5 units radius
+          });
+
+          if (nearBuilder) {
+            // Build progress goes up fast!
+            ent.buildProgress = (ent.buildProgress || 0) + 0.006; 
+            
+            // Turn nearBuilder to face the building
+            const angleToBuild = Math.atan2(ent.x - nearBuilder.x, ent.z - nearBuilder.z);
+            nearBuilder.angle = angleToBuild;
+
+            // Spawn visual welding sparks at construction site
+            if (Math.random() < 0.45) {
+              const sparkMaterial = new THREE.MeshBasicMaterial({ color: '#22d3ee', transparent: true, opacity: 0.9 });
+              const sparkMesh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 4, 4), sparkMaterial);
+              sparkMesh.position.set(
+                ent.x + (Math.random() - 0.5) * 1.6,
+                currentElevation + (ent.buildProgress || 0) * 0.9 + 0.1,
+                ent.z + (Math.random() - 0.5) * 1.6
+              );
+              scene.add(sparkMesh);
+              explosionParticles.push({
+                mesh: sparkMesh,
+                stepY: Math.random() * 0.06 + 0.02,
+                life: 0.2,
+                sizeShrink: 0.9
+              });
+            }
+          } else {
+            // Slow passive rate if no builder is present
+            ent.buildProgress = (ent.buildProgress || 0) + 0.0001;
+          }
+
+          mesh.scale.set(1, Math.min(1.0, ent.buildProgress || 0.05), 1); // rise above ground
           if (ent.buildProgress >= 1.0) {
             ent.buildProgress = 1.0;
             ent.state = 'idle';
             sound.playBuildComplete();
-            pushNotification(`Structure construction blueprint finalized!`, 'success');
+            pushNotification(`Строительство завершено успешно: ${BUILDING_PROPERTIES[ent.subType as BuildingType]?.name || ent.subType}`, 'success');
+          }
+        }
+
+        // --- INTERACTIVE GARRISONING STATE MACHINE ---
+        if (ent.type === 'unit' && ent.state === 'moving' && ent.subType === 'cyber_specops') {
+          // Find if there is any active civilian building within 1.6 meters to occupy!
+          const nearCiv = sim.entities.find(e => 
+            e.type === 'building' && 
+            e.subType === 'civilian_building' && 
+            e.state !== 'dead' && 
+            Math.sqrt((e.x - ent.x)*(e.x - ent.x) + (e.z - ent.z)*(e.z - ent.z)) < 1.6
+          );
+          if (nearCiv) {
+            // Claim entry!
+            ent.state = 'garrisoned';
+            ent.garrisonedIn = nearCiv.id;
+            ent.targetX = undefined;
+            ent.targetZ = undefined;
+            pushNotification(`Спецназ закрепился на огневых позициях в городском здании!`, 'success');
+          }
+        }
+
+        // Active Garrison firing loop inside building
+        if (ent.type === 'unit' && ent.state === 'garrisoned' && ent.garrisonedIn) {
+          const b = sim.entities.find(e => e.id === ent.garrisonedIn);
+          if (b && b.state !== 'dead') {
+            // Lock unit position to building coordinate
+            ent.x = b.x;
+            ent.z = b.z;
+
+            // Dynamically claim building ownership to garrisoned player!
+            if (b.playerId !== ent.playerId) {
+              b.playerId = ent.playerId;
+              b.team = ent.team;
+              pushNotification(`Установлен контроль над городским узлом обороны!`, 'success');
+            }
+
+            // Passive periodic shooting out of structural windows!
+            if (!ent.cooldown || ent.cooldown <= 0) {
+              const enemies = sim.entities.filter(e => e.state !== 'dead' && e.team !== ent.team && Math.sqrt((e.x - b.x)*(e.x - b.x) + (e.z - b.z)*(e.z - b.z)) < 7.0);
+              if (enemies.length > 0) {
+                const victim = enemies[0];
+                ent.cooldown = 35; // fire pace
+
+                // Render bright direct glowing rifle bullet tracer cylinder
+                const lClr = ent.playerId === playerId ? '#22d3ee' : '#f87171';
+                const tracerB = new THREE.Mesh(
+                  new THREE.CylinderGeometry(0.015, 0.015, 0.4, 4),
+                  new THREE.MeshBasicMaterial({ color: lClr })
+                );
+                // Position tracer at correct altitude
+                tracerB.position.set((b.x + victim.x)/2, currentElevation + 1.2, (b.z + victim.z)/2);
+                scene.add(tracerB);
+                explosionParticles.push({ mesh: tracerB, stepY: 0.05, life: 0.1 });
+
+                // Hurt the target with infantry bullets damage
+                victim.health = Math.max(0, victim.health - 15);
+                if (victim.health <= 0) {
+                  victim.state = 'dead';
+                  pushNotification(`Гарнизон уничтожил вражескую пехоту!`, 'warn');
+                }
+              }
+            }
+          } else {
+            // Building got destroyed: eject surviving infantry at half health!
+            ent.state = 'idle';
+            ent.garrisonedIn = undefined;
+            ent.health = Math.max(15, Math.floor(ent.health * 0.5));
+            ent.x = ent.x + (Math.random() - 0.5) * 2;
+            ent.z = ent.z + (Math.random() - 0.5) * 2;
+            pushNotification(`Гарнизон выбит взрывом из разрушенного строения!`, 'warn');
+          }
+        }
+
+
+        // --- AUTOMATED HARVESTER STATE MACHINE ---
+        if (ent.type === 'unit' && ent.subType === 'harvester' && ent.state !== 'dead') {
+          if (!ent.harvesterState) ent.harvesterState = 'idle';
+          if (ent.harvesterCargo === undefined) ent.harvesterCargo = 0;
+
+          if (ent.harvesterState === 'idle') {
+            // Locate closest completed oil derrick
+            const derricks = sim.entities.filter(e => e.type === 'building' && e.subType === 'oil_derrick' && e.state !== 'dead' && e.buildProgress && e.buildProgress >= 1);
+            if (derricks.length > 0) {
+              let closestD = derricks[0];
+              let minDistSq = 999999;
+              derricks.forEach(d => {
+                const dSq = (d.x - ent.x)*(d.x - ent.x) + (d.z - ent.z)*(d.z - ent.z);
+                if (dSq < minDistSq) {
+                  minDistSq = dSq;
+                  closestD = d;
+                }
+              });
+              ent.harvesterState = 'moving_to_extract';
+              ent.targetX = closestD.x;
+              ent.targetZ = closestD.z;
+              ent.state = 'moving';
+            } else {
+              // Stay close to refineries or Base
+              const hubs = sim.entities.filter(e => e.type === 'building' && (e.subType === 'supply_refinery' || e.subType === 'command_center') && e.playerId === ent.playerId && e.state !== 'dead');
+              if (hubs.length > 0 && ent.state === 'idle') {
+                ent.targetX = hubs[0].x + (Math.random() - 0.5) * 4;
+                ent.targetZ = hubs[0].z + (Math.random() - 0.5) * 4;
+                ent.state = 'moving';
+              }
+            }
+          }
+
+          else if (ent.harvesterState === 'moving_to_extract') {
+            const derricks = sim.entities.filter(e => e.type === 'building' && e.subType === 'oil_derrick' && e.state !== 'dead');
+            const targetD = derricks.find(d => Math.abs(d.x - (ent.targetX || 0)) < 1.0 && Math.abs(d.z - (ent.targetZ || 0)) < 1.0);
+            if (!targetD) {
+              ent.harvesterState = 'idle';
+            } else {
+              const dx = targetD.x - ent.x;
+              const dz = targetD.z - ent.z;
+              const dist = Math.sqrt(dx*dx + dz*dz);
+              if (dist < 1.8) {
+                ent.state = 'idle';
+                ent.harvesterState = 'extracting';
+                ent.harvesterTimer = 150; // 2.5 seconds loading oil cargo
+              } else {
+                ent.state = 'moving';
+                ent.targetX = targetD.x;
+                ent.targetZ = targetD.z;
+              }
+            }
+          }
+
+          else if (ent.harvesterState === 'extracting') {
+            ent.harvesterTimer = (ent.harvesterTimer || 150) - 1;
+
+            // Spasmodic yellow sparks cargo indicator
+            if (Math.random() < 0.3) {
+              const oilSpark = new THREE.Mesh(new THREE.SphereGeometry(0.1, 4, 4), new THREE.MeshBasicMaterial({ color: '#fbbf24' }));
+              oilSpark.position.set(ent.x + (Math.random()-0.5)*0.6, currentElevation + 0.3, ent.z + (Math.random()-0.5)*0.6);
+              scene.add(oilSpark);
+              explosionParticles.push({ mesh: oilSpark, stepY: 0.04, life: 0.2, sizeShrink: 0.9 });
+            }
+
+            if (ent.harvesterTimer <= 0) {
+              ent.harvesterCargo = 150; // oil payload
+              ent.harvesterState = 'moving_to_unload';
+
+              // Find closest delivery point
+              const hubs = sim.entities.filter(e => e.type === 'building' && (e.subType === 'supply_refinery' || e.subType === 'command_center') && e.playerId === ent.playerId && e.state !== 'dead');
+              if (hubs.length > 0) {
+                let closestH = hubs[0];
+                let minDistSq = 999999;
+                hubs.forEach(h => {
+                  const dSq = (h.x - ent.x)*(h.x - ent.x) + (h.z - ent.z)*(h.z - ent.z);
+                  if (dSq < minDistSq) {
+                    minDistSq = dSq;
+                    closestH = h;
+                  }
+                });
+                ent.targetX = closestH.x;
+                ent.targetZ = closestH.z;
+                ent.state = 'moving';
+              } else {
+                ent.harvesterState = 'idle'; // await dropoff building
+              }
+            }
+          }
+
+          else if (ent.harvesterState === 'moving_to_unload') {
+            const hubs = sim.entities.filter(e => e.type === 'building' && (e.subType === 'supply_refinery' || e.subType === 'command_center') && e.playerId === ent.playerId && e.state !== 'dead');
+            const targetH = hubs.find(h => Math.abs(h.x - (ent.targetX || 0)) < 1.0 && Math.abs(h.z - (ent.targetZ || 0)) < 1.0) || hubs[0];
+            if (!targetH) {
+              ent.harvesterState = 'idle';
+            } else {
+              const dx = targetH.x - ent.x;
+              const dz = targetH.z - ent.z;
+              const dist = Math.sqrt(dx*dx + dz*dz);
+              if (dist < 2.2) {
+                ent.state = 'idle';
+                ent.harvesterState = 'unloading';
+                ent.harvesterTimer = 90; // 1.5 seconds pumping resources
+              } else {
+                ent.state = 'moving';
+                ent.targetX = targetH.x;
+                ent.targetZ = targetH.z;
+              }
+            }
+          }
+
+          else if (ent.harvesterState === 'unloading') {
+            ent.harvesterTimer = (ent.harvesterTimer || 90) - 1;
+            if (ent.harvesterTimer <= 0) {
+              const payload = ent.harvesterCargo || 150;
+              ent.harvesterCargo = 0;
+              ent.harvesterState = 'idle';
+
+              // Pay player account!
+              if (ent.playerId === playerId) {
+                sim.credits += payload;
+                setCredits(sim.credits);
+                pushNotification(`Экономика: Сырая нефть доставлена! Бюджет пополнен на +$${payload}`, 'success');
+              } else {
+                // AI gets budget
+                const ai = sim.players.find(p => p.id === ent.playerId);
+                if (ai) {
+                  // AI keeps moving
+                }
+              }
+
+              // Coin release visual representation
+              const coinG = new THREE.CylinderGeometry(0.18, 0.18, 0.04, 8);
+              const coinM = new THREE.MeshBasicMaterial({ color: '#facc15' });
+              const coinMesh = new THREE.Mesh(coinG, coinM);
+              coinMesh.position.set(ent.x, currentElevation + 1.2, ent.z);
+              scene.add(coinMesh);
+              explosionParticles.push({ mesh: coinMesh, stepY: 0.03, life: 0.4, sizeShrink: 0.95 });
+            }
           }
         }
 
@@ -2848,12 +3494,40 @@ export default function RTSGameCanvas({
 
       // Update particle explosions animation steps
       for (let i = explosionParticles.length - 1; i >= 0; i--) {
-        const p = explosionParticles[i];
-        p.mesh.position.y += p.stepY;
-        if (p.stepX !== undefined) p.mesh.position.x += p.stepX;
-        if (p.stepZ !== undefined) p.mesh.position.z += p.stepZ;
-        if (p.sizeShrink !== undefined && p.mesh.scale.x > 0.01) {
-          p.mesh.scale.multiplyScalar(p.sizeShrink);
+        const p: any = explosionParticles[i];
+        
+        // Apply physics-based gravity to falling wreckage debris
+        if (p.hasGravity) {
+          p.stepY -= 0.007; // pull down by gravity
+          p.mesh.rotation.x += p.rotX || 0.04;
+          p.mesh.rotation.y += p.rotY || 0.04;
+
+          p.mesh.position.y += p.stepY;
+          if (p.stepX !== undefined) p.mesh.position.x += p.stepX;
+          if (p.stepZ !== undefined) p.mesh.position.z += p.stepZ;
+
+          // Detect collision against terrain height for bouncing!
+          const terrHeight = getTerrainHeight(p.mesh.position.x, p.mesh.position.z, map);
+          if (p.mesh.position.y < terrHeight + 0.06) {
+            p.mesh.position.y = terrHeight + 0.06;
+            p.stepY = -p.stepY * 0.45; // bounce index
+            p.stepX = (p.stepX || 0) * 0.65; // friction index
+            p.stepZ = (p.stepZ || 0) * 0.65; // friction index
+          }
+        } else if (p.isRing) {
+          // Ring shockwave expansion & opacity fading
+          p.mesh.scale.multiplyScalar(p.sizeShrink || 1.06);
+          if (p.mesh.material && typeof p.mesh.material.opacity === 'number') {
+            p.mesh.material.opacity -= 0.035;
+          }
+        } else {
+          // Standard smoke/spark particles
+          p.mesh.position.y += p.stepY;
+          if (p.stepX !== undefined) p.mesh.position.x += p.stepX;
+          if (p.stepZ !== undefined) p.mesh.position.z += p.stepZ;
+          if (p.sizeShrink !== undefined && p.mesh.scale.x > 0.01) {
+            p.mesh.scale.multiplyScalar(p.sizeShrink);
+          }
         }
 
         p.life -= 0.02;
@@ -3239,13 +3913,19 @@ export default function RTSGameCanvas({
 
       // f. Cash & Power HUD Synchronization triggers
       if (tickCount % 60 === 0) { // standard 1 second logic
-        let tickIncome = 5; // Base passive cash generate
+        let tickIncome = 0; // standard cash generation
 
-        // Add Oil refiner metrics
         sim.entities.forEach(ent => {
           if (ent.playerId === playerId && ent.state !== 'dead') {
-            if (ent.subType === 'supply_refinery' && ent.buildProgress && ent.buildProgress >= 1) {
+            if (ent.subType === 'command_center') {
+              // Command Center continuous fixed income! Guaranteed floor cash
               tickIncome += 15;
+            } else if (ent.subType === 'supply_refinery' && ent.buildProgress && ent.buildProgress >= 1) {
+              // Warehouse resource processing passive income
+              tickIncome += 15;
+            } else if (ent.subType === 'oil_derrick' && ent.buildProgress && ent.buildProgress >= 1) {
+              // Active derrick pumping passive cash flows
+              tickIncome += 12;
             }
           }
         });
@@ -3256,6 +3936,9 @@ export default function RTSGameCanvas({
         sim.powerReq = cacheReq;
         setPowerGenerated(cacheGen);
         setPowerRequired(cacheReq);
+
+        // Sync camera coordinates with React to update minimap frame outline
+        setCamPos({ x: sim.camX, z: sim.camZ, zoom: sim.camZoom });
 
         // Slow charge Commander powers
         if (sim.commandCharge < 100) {
@@ -3327,17 +4010,34 @@ export default function RTSGameCanvas({
       return;
     }
 
-    // Must have matching barracks or war factory structure
-    const isInfantry = ['drone_scout', 'drone_kamikaze', 'cyber_specops'].includes(unitType);
-    const requiredBuildingType = isInfantry ? 'barracks' : 'war_factory';
+    // Match appropriate structure for recruiting/production
+    let requiredBuildingType: BuildingType = 'war_factory';
+    if (unitType === 'builder') {
+      requiredBuildingType = 'command_center';
+    } else if (unitType === 'harvester') {
+      requiredBuildingType = 'war_factory';
+    } else {
+      const isInfantry = ['drone_scout', 'drone_kamikaze', 'cyber_specops'].includes(unitType);
+      requiredBuildingType = isInfantry ? 'barracks' : 'war_factory';
+    }
 
     const sim = simulationRef.current;
     const producingFactory = sim.entities.find(
-      e => e.playerId === playerId && e.subType === requiredBuildingType && e.state === 'idle'
+      e => e.playerId === playerId && e.subType === requiredBuildingType && e.state !== 'dead'
     );
 
     if (!producingFactory) {
-      pushNotification(`Для производства требуется готовое здание типа: ${requiredBuildingType === 'barracks' ? 'Казармы' : 'Военный Завод'}!`, 'warn');
+      const bNames: Record<BuildingType, string> = {
+        command_center: 'Штаб Командования',
+        power_plant: 'Электростанция',
+        supply_refinery: 'Центр Снабжения',
+        barracks: 'Казармы Дронов',
+        war_factory: 'Военный Завод',
+        defense_turret: 'Защитная Турель',
+        oil_derrick: 'Нефтяная Вышка',
+        civilian_building: 'Городское Здание'
+      };
+      pushNotification(`Для производства требуется готовое здание: ${bNames[requiredBuildingType]}!`, 'warn');
       return;
     }
 
@@ -3407,6 +4107,15 @@ export default function RTSGameCanvas({
     sound.playClick();
   };
 
+  const simForUI = simulationRef.current;
+  const selectedEntities = simForUI.entities.filter(ent => selectedEntityIds.includes(ent.id));
+  
+  const hasSelectedBuilder = selectedEntities.some(ent => ent.type === 'unit' && ent.subType === 'builder');
+  const hasSelectedCC = selectedEntities.some(ent => ent.type === 'building' && ent.subType === 'command_center');
+  const hasSelectedBarracks = selectedEntities.some(ent => ent.type === 'building' && ent.subType === 'barracks');
+  const hasSelectedWarFactory = selectedEntities.some(ent => ent.type === 'building' && ent.subType === 'war_factory');
+  const isContextActive = hasSelectedBuilder || hasSelectedCC || hasSelectedBarracks || hasSelectedWarFactory;
+
   return (
     <div className="h-screen w-screen bg-[#070b0e] text-slate-100 flex flex-col relative select-none font-sans overflow-hidden">
       {/* 3D Viewport container */}
@@ -3469,7 +4178,20 @@ export default function RTSGameCanvas({
       </div>
 
       {/* Modern Right HUD Command Panel Construction yard, Minimap, and power bars */}
-      <div className="absolute right-4 bottom-4 top-16 w-80 bg-slate-950/95 border border-slate-800 backdrop-blur p-4 rounded-xl flex flex-col justify-between shadow-2xl z-20">
+      <div className={`absolute right-4 bottom-4 top-16 w-80 bg-slate-950/95 border border-slate-800 backdrop-blur p-4 rounded-xl flex flex-col justify-between shadow-2xl z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-x-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
+        
+        {/* Toggle Collapse handle anchored on left border of panel */}
+        <button
+          onClick={() => setIsMenuCollapsed(!isMenuCollapsed)}
+          className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-12 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-l-md flex items-center justify-center text-slate-350 cursor-pointer shadow-lg z-30"
+          title={isMenuCollapsed ? "Развернуть панель" : "Свернуть панель"}
+        >
+          {isMenuCollapsed ? (
+            <ChevronLeft className="w-4 h-4 text-cyan-400 animate-pulse" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-slate-400" />
+          )}
+        </button>
         
         {/* Top Section: Radar Minimap with colored indicator targets */}
         <div>
@@ -3532,6 +4254,25 @@ export default function RTSGameCanvas({
               );
             })}
 
+            {/* Real-time Player Viewport Camera Frame indicator */}
+            <div
+              className="absolute border border-dashed border-cyan-400/80 pointer-events-none rounded-xs bg-cyan-500/5 transition-all duration-75"
+              style={{
+                width: `${(26 / lobby.mapSize) * 100}%`,
+                height: `${(20 / lobby.mapSize) * 100}%`,
+                left: `${(camPos.x / lobby.mapSize) * 100}%`,
+                top: `${(1 - camPos.z / lobby.mapSize) * 100}%`,
+                transform: 'translate(-50%, -50%)',
+                boxShadow: '0 0 6px rgba(34, 211, 238, 0.25)'
+              }}
+            >
+              {/* Retro tiny viewfinder corner brackets */}
+              <div className="absolute top-0 left-0 w-1 h-1 border-t border-l border-cyan-400" />
+              <div className="absolute top-0 right-0 w-1 h-1 border-t border-r border-cyan-400" />
+              <div className="absolute bottom-0 left-0 w-1 h-1 border-b border-l border-cyan-400" />
+              <div className="absolute bottom-0 right-0 w-1 h-1 border-b border-r border-cyan-400" />
+            </div>
+
             {/* Scanning radar sweep visually layered */}
             <div className="absolute inset-0 bg-gradient-to-t from-cyan-500/0 via-cyan-500/5 to-cyan-500/0 animate-radar-sweep pointer-events-none" />
           </div>
@@ -3570,53 +4311,162 @@ export default function RTSGameCanvas({
         {/* Bottom Section: Structure Deployers / Factories recruiters */}
         <div className="border-t border-slate-900 pt-3 mt-3 flex-1 flex flex-col justify-end">
           
-          {/* Construction Blueprint options */}
           <div className="space-y-4">
-            <div>
-              <h4 className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold mb-2">РАЗВЕРТЫВАНИЕ СТРОЕНИЙ</h4>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(['power_plant', 'supply_refinery', 'barracks', 'war_factory', 'defense_turret'] as BuildingType[]).map(key => {
-                  const prop = getFactionBuildingProperties(key, selfPlayer.faction);
-                  const active = buildingToPlace === key;
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => activeConstructionMode(key)}
-                      disabled={credits < prop.cost}
-                      className={`p-2.5 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer border ${
-                        active 
-                          ? 'bg-cyan-950/20 border-cyan-400 text-cyan-300' 
-                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-350'
-                      } disabled:opacity-40 disabled:cursor-not-allowed`}
-                    >
-                      <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
-                      <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
-                    </button>
-                  );
-                })}
+            
+            {/* Context: Builder selected */}
+            {hasSelectedBuilder && (
+              <div className="animate-fade-in">
+                <div className="flex justify-between items-center mb-1.5">
+                  <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold">РАЗВЕРТЫВАНИЕ СТРОЕНИЙ (СТРОИТЕЛЬ)</h4>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(['power_plant', 'supply_refinery', 'oil_derrick', 'barracks', 'war_factory', 'defense_turret'] as BuildingType[]).map(key => {
+                    const prop = getFactionBuildingProperties(key, selfPlayer.faction);
+                    const active = buildingToPlace === key;
+                    const canAfford = credits >= prop.cost;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => activeConstructionMode(key)}
+                        onMouseEnter={() => setHoveredItem({ type: 'building', key })}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        disabled={!canAfford}
+                        className={`p-2 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer border ${
+                          active 
+                            ? 'bg-cyan-950/20 border-cyan-400 text-cyan-300' 
+                            : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-350'
+                        } disabled:opacity-40 disabled:cursor-not-allowed`}
+                      >
+                        <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Recruit Unit options */}
-            <div className="border-t border-slate-900 pt-3">
-              <h4 className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold mb-2">ПРОИЗВОДСТВО ВОЙСК</h4>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(['drone_scout', 'drone_kamikaze', 'cyber_specops', 'precision_tank', 'artillery_mlrs', 'mobile_jammer'] as UnitType[]).map(key => {
-                  const prop = getFactionUnitProperties(key, selfPlayer.faction);
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => handleTrainUnit(key)}
-                      disabled={credits < prop.cost}
-                      className="p-1 px-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-40 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      <span className="text-[9.5px] font-bold uppercase line-clamp-1">{prop.name}</span>
-                      <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
-                    </button>
-                  );
-                })}
+            {/* Context: Command Center selected */}
+            {hasSelectedCC && (
+              <div className="animate-fade-in">
+                <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-2 font-bold uppercase text-left">ШТАБ: ПОДГОТОВКА СТРОИТЕЛЕЙ</h4>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(['builder'] as UnitType[]).map(key => {
+                    const prop = getFactionUnitProperties(key, selfPlayer.faction);
+                    const canAfford = credits >= prop.cost;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => handleTrainUnit(key)}
+                        onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        disabled={!canAfford}
+                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-40 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Context: Barracks selected */}
+            {hasSelectedBarracks && (
+              <div className="animate-fade-in">
+                <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-2 font-bold uppercase text-left">КАЗАРМЫ: ПОДГОТОВКА ВОЙСК</h4>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(['drone_scout', 'drone_kamikaze', 'cyber_specops'] as UnitType[]).map(key => {
+                    const prop = getFactionUnitProperties(key, selfPlayer.faction);
+                    const canAfford = credits >= prop.cost;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => handleTrainUnit(key)}
+                        onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        disabled={!canAfford}
+                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-40 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Context: War Factory selected */}
+            {hasSelectedWarFactory && (
+              <div className="animate-fade-in">
+                <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-2 font-bold uppercase text-left">ВОЕННЫЙ ЗАВОД: СБОРКА ТЕХНИКИ</h4>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(['precision_tank', 'artillery_mlrs', 'mobile_jammer', 'harvester'] as UnitType[]).map(key => {
+                    const prop = getFactionUnitProperties(key, selfPlayer.faction);
+                    const canAfford = credits >= prop.cost;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => handleTrainUnit(key)}
+                        onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        disabled={!canAfford}
+                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-40 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Default: HQ instructions if no building is selected */}
+            {!isContextActive && (
+              <div className="bg-slate-950/40 border border-slate-900/85 p-3.5 rounded-xl text-center space-y-3 shadow-inner">
+                <p className="text-[11px] font-mono text-cyan-500 animate-pulse uppercase tracking-widest font-bold">ОПЕРАТИВНЫЙ ШТАБ</p>
+                <p className="text-[10px] text-slate-400 leading-normal">
+                  Кликните по дружественному <span className="text-slate-200 font-semibold uppercase">Штабу</span>, <span className="text-slate-200 font-semibold uppercase">Строителю</span> или <span className="text-slate-200 font-semibold uppercase">Заводу</span> на поле боя для активации меню заказов.
+                </p>
+                <div className="flex flex-col items-stretch gap-1 text-[10px] font-mono border-t border-slate-900/60 pt-2 text-slate-500">
+                  <div className="flex justify-between">
+                    <span>ФРАКЦИЯ:</span>
+                    <span className="text-slate-350 font-bold uppercase text-cyan-400">{selfPlayer.faction}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>ЛИМИТ НА КАРТЕ:</span>
+                    <span className="text-slate-350">{simulationRef.current?.entities.filter(e => e.playerId === playerId && e.state !== 'dead').length || 0} ЕД.</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Gorgeous glowing 2-second hover tooltip display */}
+            {hoveredItem && tooltipVisible && (
+              <div className="border border-cyan-800/45 bg-cyan-950/25 p-3 rounded-xl animate-fade-in shadow-lg text-left">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[10.5px] font-bold text-cyan-300 uppercase">
+                    {hoveredItem.type === 'unit' 
+                      ? getFactionUnitProperties(hoveredItem.key as UnitType, selfPlayer.faction).name 
+                      : getFactionBuildingProperties(hoveredItem.key as BuildingType, selfPlayer.faction).name}
+                  </span>
+                  <span className="text-[9px] font-mono font-bold text-emerald-400">
+                    ${hoveredItem.type === 'unit' 
+                      ? getFactionUnitProperties(hoveredItem.key as UnitType, selfPlayer.faction).cost 
+                      : getFactionBuildingProperties(hoveredItem.key as BuildingType, selfPlayer.faction).cost}
+                  </span>
+                </div>
+                <p className="text-[10px] text-cyan-200/70 leading-relaxed font-mono">
+                  {hoveredItem.type === 'unit' 
+                    ? getFactionUnitProperties(hoveredItem.key as UnitType, selfPlayer.faction).desc 
+                    : getFactionBuildingProperties(hoveredItem.key as BuildingType, selfPlayer.faction).desc}
+                </p>
+              </div>
+            )}
+
           </div>
         </div>
 

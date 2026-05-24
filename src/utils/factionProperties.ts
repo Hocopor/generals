@@ -112,7 +112,7 @@ export function getFactionUnitProperties(unitType: UnitType, faction: Faction): 
     case 'mobile_jammer':
       if (faction === 'Alliance') {
         name = 'Щит-Протектор'; hp = 180; speed = 1.3; range = 0; dps = 0; cost = 400;
-        desc = 'Машина РЭБ. Генерирует активное силовое поле невидимой маскировки.';
+        desc = 'Машина РЭБ. Генерирует active силовое поле невидимой маскировки.';
       } else if (faction === 'Coalition') {
         name = 'Форпост-Заглушка'; hp = 220; speed = 1.1; range = 0; dps = 0; cost = 430;
         desc = 'Прочный бронетранспортер Коалиции с комплексом подавления радаров.';
@@ -122,6 +122,38 @@ export function getFactionUnitProperties(unitType: UnitType, faction: Faction): 
       } else { // Syndicate
         name = 'Искажатель Тень'; hp = 150; speed = 1.5; range = 0; dps = 0; cost = 380;
         desc = 'Сверхбыстрый стелс-глушитель, искривляющий лазерное наведение.';
+      }
+      break;
+
+    case 'builder':
+      if (faction === 'Alliance') {
+        name = 'Внедорожник-Инженер «Авангард»'; hp = 110; speed = 1.4; range = 0; dps = 0; cost = 200;
+        desc = 'Высокотехнологичный строительный джип. Направляет голографические сборочные лучи для возведения зданий.';
+      } else if (faction === 'Coalition') {
+        name = 'Инженерный Тягач «Долото»'; hp = 160; speed = 1.1; range = 0; dps = 0; cost = 200;
+        desc = 'Тяжелая бронированная пионерная машина Коалиции с двойными гидро-манипуляторами.';
+      } else if (faction === 'Union') {
+        name = 'Строительный Трактор МПС-7'; hp = 135; speed = 1.25; range = 0; dps = 0; cost = 150;
+        desc = 'Советский надежный гусеничный трактор с сильными сварочными дугами и автоматикой.';
+      } else { // Syndicate
+        name = 'Нано-Био Формовщик «Прядильщик»'; hp = 115; speed = 1.5; range = 0; dps = 0; cost = 220;
+        desc = 'Парящий многоногий дрон- weaver Синдиката, плетущий каркасы зданий из нано-полимеров.';
+      }
+      break;
+
+    case 'harvester':
+      if (faction === 'Alliance') {
+        name = 'Квантовый Сборщик «Хронос»'; hp = 160; speed = 1.6; range = 0; dps = 0; cost = 300;
+        desc = 'Логистический грузовик Альянса с плазменным хранилищем для быстрой разгрузки.';
+      } else if (faction === 'Coalition') {
+        name = 'Тяжелый Рудовоз «Урал-Э»'; hp = 260; speed = 1.2; range = 0; dps = 0; cost = 300;
+        desc = 'Медленный, но капитально защищенный грузовик снабжения Коалиции огромной емкости.';
+      } else if (faction === 'Union') {
+        name = 'Гусеничный Трак ПС-4'; hp = 180; speed = 1.35; range = 0; dps = 0; cost = 250;
+        desc = 'Сбалансированный армейский самосвал Союза, приспособленный для сурового бездорожья.';
+      } else { // Syndicate
+        name = 'Био-Сифон «Токсин-Т6»'; hp = 140; speed = 1.7; range = 0; dps = 0; cost = 280;
+        desc = 'Сверхбыстрый заправщик Синдиката. Всасывает топливный концентрат со скважин.';
       }
       break;
   }
@@ -232,6 +264,27 @@ export function getFactionBuildingProperties(bType: BuildingType, faction: Facti
         name = 'Плазменный Шип'; hp = 620; cost = 340; power = -18;
         desc = 'Биологическое стрелковое жало, плюющееся высокотемпературным аргоном.';
       }
+      break;
+
+    case 'oil_derrick':
+      if (faction === 'Alliance') {
+        name = 'Автоматив-Скважина АВ-10'; hp = 600; cost = 300; power = -10;
+        desc = 'Нефтевышка. Строится строителем на поле. Качает ресурсы для грузовиков.';
+      } else if (faction === 'Coalition') {
+        name = 'Скважина Буровая «Базальт»'; hp = 850; cost = 320; power = -12;
+        desc = 'Нефтевышка. Разрабатывается строителем. Имеет толстые стальные перекрытия.';
+      } else if (faction === 'Union') {
+        name = 'Нефтевышка НПЗ-Кама'; hp = 550; cost = 260; power = -8;
+        desc = 'Нефтевышка. Строится строителем. Надежный советский насос качалки.';
+      } else { // Syndicate
+        name = 'Токсичный Сифон «Газ-Абсорб»'; hp = 580; cost = 290; power = -10;
+        desc = 'Нефтевышка. Нагнетает давление, извлекая концентрированные химикаты.';
+      }
+      break;
+
+    case 'civilian_building':
+      name = 'Гражданский Комплекс охраны'; hp = 1500; cost = 0; power = 0;
+      desc = 'Интерактивное защитное здание. Выберите пехоту и направьте правой кнопкой для занятия гарнизона.';
       break;
   }
 

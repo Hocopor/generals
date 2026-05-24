@@ -31,7 +31,9 @@ export type UnitType =
   | 'cyber_specops'     // Infiltrator, can capture buildings, cloaked while standing still
   | 'precision_tank'    // Standard combat arm, balanced range and armor
   | 'artillery_mlrs'    // Long-range barrage launcher, fragile
-  | 'mobile_jammer';    // EW vehicle, cloaks nearby allies, disables nearby enemy radar
+  | 'mobile_jammer'     // EW vehicle, cloaks nearby allies, disables nearby enemy radar
+  | 'builder'           // Combat builder vehicle of the faction
+  | 'harvester';        // Resource logistics unit
 
 export type BuildingType =
   | 'command_center'    // Spawn point, radar, command power triggers
@@ -39,7 +41,9 @@ export type BuildingType =
   | 'supply_refinery'   // Collects oil/credits automatically or spawns trucks
   | 'barracks'          // Recruits infantry/drones
   | 'war_factory'       // Builds vehicles like tanks, artillery, jammers
-  | 'defense_turret';   // Automated heavy weapon turret
+  | 'defense_turret'    // Automated heavy weapon turret
+  | 'oil_derrick'       // Energy derrick built by builders to pump liquid gold
+  | 'civilian_building'; // Neutral high-ground garrisonable structural cover
 
 export interface GameEntity {
   id: string;
