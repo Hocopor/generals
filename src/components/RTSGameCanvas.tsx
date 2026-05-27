@@ -4,7 +4,7 @@ import { Faction, Lobby, Player, GameEntity, BuildingType, UnitType, GameActionE
 import { sound } from '../utils/audio';
 import { generateProceduralMap, GeneratedMap, MapNode } from '../utils/mapGenerator';
 import { getFactionUnitProperties, getFactionBuildingProperties } from '../utils/factionProperties';
-import { Shield, Zap, Sparkles, Swords, Play, Compass, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Shield, Zap, Sparkles, Swords, Play, Compass, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface RTSGameCanvasProps {
   lobby: Lobby;
@@ -103,6 +103,25 @@ export default function RTSGameCanvas({
   const [productionQueue, setProductionQueue] = useState<{ buildingId: string; type: UnitType; progress: number }[]>([]);
   const [commandStrikeActive, setCommandStrikeActive] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: 'info' | 'warn' | 'success' }[]>([]);
+
+  // Mobile adaptation states
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [mobileMode, setMobileMode] = useState<'select' | 'order'>('select');
+  const mobileModeRef = useRef<'select' | 'order'>('select');
+
+  useEffect(() => {
+    mobileModeRef.current = mobileMode;
+  }, [mobileMode]);
+
+  useEffect(() => {
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    const isSmall = window.innerWidth <= 1024;
+    const mobileDetected = isTouch || isSmall;
+    setIsMobile(mobileDetected);
+    if (mobileDetected) {
+      setIsMenuCollapsed(true);
+    }
+  }, []);
 
   // Viewport mapping and collapsible state HUD options
   const [camPos, setCamPos] = useState({ x: 30, z: 30, zoom: 30 });
@@ -236,7 +255,7 @@ export default function RTSGameCanvas({
       startingEntities.push(bObj);
 
       // Start with some defensive guards nearby starting bases
-      const guardTypes: UnitType[] = ['drone_scout', 'precision_tank'];
+      const guardTypes: UnitType[] = ['drone_scout', 'precision_tank', 'builder'];
       guardTypes.forEach((gt, uIdx) => {
         const theta = (uIdx * 2 * Math.PI) / guardTypes.length;
         const uProps = getUnitProps(gt, base.playerId, fullPlayersList);
@@ -372,6 +391,10 @@ export default function RTSGameCanvas({
     if (!mountRef.current || !simulationRef.current.map) return;
     const sim = simulationRef.current;
     const map = sim.map!;
+
+    let lastSentCamX = sim.camX;
+    let lastSentCamZ = sim.camZ;
+    let lastSentCamZoom = sim.camZoom;
 
     const width = mountRef.current.clientWidth;
     const height = mountRef.current.clientHeight;
@@ -1829,131 +1852,265 @@ export default function RTSGameCanvas({
           }
 
         } else if (ent.subType === 'builder') {
-          // Modern versatile engineering repair & construction chassis
-          const heavyChassis = new THREE.Mesh(
-            new THREE.BoxGeometry(0.95, 0.38, 1.45),
-            vehicleHull
-          );
-          heavyChassis.position.y = 0.19;
-          heavyChassis.castShadow = true;
-          heavyChassis.receiveShadow = true;
-          g.add(heavyChassis);
+          // --- FACTION SPECIFIC BUILDER 3D MODEL DESIGNS ---
+          if (faction === 'Alliance') {
+            // "Внедорожник-Инженер «Авангард»" - Sleek hover rover
+            const sleekBody = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.28, 1.3), vehicleHull);
+            sleekBody.position.y = 0.25;
+            g.add(sleekBody);
 
-          // Faction specific cabin aesthetics
-          const frontBumper = new THREE.Mesh(
-            new THREE.BoxGeometry(1.05, 0.2, 0.3),
-            dynamicCoating
-          );
-          frontBumper.position.set(0, 0.12, 0.62);
-          g.add(frontBumper);
+            const cabinGlass = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.25, 0.55), glowingCore);
+            cabinGlass.position.set(0, 0.45, 0.25);
+            g.add(cabinGlass);
 
-          // 3-Segment Articulated Crane boom/welding laser arm
-          const craneBaseJoint = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.18, 0.18, 0.15),
-            structuralHull
-          );
-          craneBaseJoint.position.set(0, 0.45, -0.2);
-          g.add(craneBaseJoint);
+            // Hovering side thruster rings
+            [[-0.55, -0.4], [0.55, -0.4], [-0.55, 0.4], [0.55, 0.4]].forEach(([sx, sz]) => {
+              const ringMat = glowingCore;
+              const ring = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.04, 6, 12), ringMat);
+              ring.rotation.x = Math.PI / 2;
+              ring.position.set(sx, 0.15, sz);
+              g.add(ring);
+            });
 
-          const mainCraneArm = new THREE.Mesh(
-            new THREE.BoxGeometry(0.1, 0.1, 0.75),
-            structuralHull
-          );
-          mainCraneArm.rotation.x = -Math.PI / 4;
-          mainCraneArm.position.set(0, 0.68, -0.38);
-          g.add(mainCraneArm);
+            // Modern vertical hologram laser arm
+            const laserPost = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.65), structuralHull);
+            laserPost.position.set(0, 0.55, -0.3);
+            g.add(laserPost);
 
-          const secondaryExtender = new THREE.Mesh(
-            new THREE.BoxGeometry(0.07, 0.07, 0.6),
-            new THREE.MeshStandardMaterial({ color: '#64748b', metalness: 0.9 })
-          );
-          secondaryExtender.rotation.x = Math.PI / 6;
-          secondaryExtender.position.set(0, 0.95, -0.22);
-          g.add(secondaryExtender);
+            const holoEmitter = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), glowingCore);
+            holoEmitter.position.set(0, 0.88, -0.3);
+            g.add(holoEmitter);
 
-          // High definition laser emitter node
-          const laserDiodLens = new THREE.Mesh(
-            new THREE.SphereGeometry(0.09, 6, 6),
-            glowingCore
-          );
-          laserDiodLens.position.set(0, 1.1, -0.05);
-          g.add(laserDiodLens);
+          } else if (faction === 'Coalition') {
+            // "Инженерный Тягач «Долото»" - Heavy duty double-hydraulics tractor
+            const heavyChassis = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.4, 1.5), vehicleHull);
+            heavyChassis.position.y = 0.2;
+            g.add(heavyChassis);
 
-          // Sturdy wheels / tracks
-          for (let side = -1; side <= 1; side += 2) {
-            for (let trackIdx = -1; trackIdx <= 1; trackIdx++) {
-              const wheelCyl = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.2, 0.2, 0.14, 8),
-                new THREE.MeshStandardMaterial({ color: '#111827', roughness: 0.9 })
-              );
-              wheelCyl.rotation.z = Math.PI / 2;
-              wheelCyl.position.set(side * 0.54, 0.1, trackIdx * 0.45);
-              g.add(wheelCyl);
+            const wideCabin = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.45, 0.65), structuralHull);
+            wideCabin.position.set(0, 0.55, 0.25);
+            g.add(wideCabin);
+
+            const orangeVisor = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.15, 0.05), glowingCore);
+            orangeVisor.position.set(0, 0.6, 0.58);
+            g.add(orangeVisor);
+
+            // Double high-impact hydraulics manipulator claw
+            const d1Arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.75), structuralHull);
+            d1Arm.rotation.x = -Math.PI / 6;
+            d1Arm.position.set(-0.35, 0.55, -0.35);
+            g.add(d1Arm);
+
+            const d2Arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.75), structuralHull);
+            d2Arm.rotation.x = -Math.PI / 6;
+            d2Arm.position.set(0.35, 0.55, -0.35);
+            g.add(d2Arm);
+
+            const welderJoint = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), glowingCore);
+            welderJoint.position.set(0, 0.75, -0.65);
+            g.add(welderJoint);
+
+            // Continuous heavy crawlers tracks helper
+            for (let side = -1; side <= 1; side += 2) {
+              const trackBelt = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.35, 1.48), structuralHull);
+              trackBelt.position.set(side * 0.58, 0.15, 0);
+              g.add(trackBelt);
             }
+
+          } else if (faction === 'Union') {
+            // "Строительный Трактор МПС-7" - Classic strong Soviet welding bulldozer
+            const frameBaseObj = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.35, 1.4), vehicleHull);
+            frameBaseObj.position.y = 0.2;
+            g.add(frameBaseObj);
+
+            const backDriverBox = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.65), structuralHull);
+            backDriverBox.position.set(0, 0.55, -0.2);
+            g.add(backDriverBox);
+
+            const yellowShieldWindows = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.22, 0.05), glowingCore);
+            yellowShieldWindows.position.set(0, 0.6, 0.14);
+            g.add(yellowShieldWindows);
+
+            // Front high-pressure mechanical scraper bulldozer blade
+            const plateScraper = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.45, 0.12), dynamicCoating);
+            plateScraper.position.set(0, 0.22, 0.75);
+            g.add(plateScraper);
+
+            // Rear mechanical welding crane
+            const welderCrane = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.65), structuralHull);
+            welderCrane.rotation.x = -Math.PI / 3;
+            welderCrane.position.set(0.25, 0.65, -0.5);
+            g.add(welderCrane);
+
+            const blueWeldingDiode = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 6), glowingCore);
+            blueWeldingDiode.position.set(0.25, 0.9, -0.75);
+            g.add(blueWeldingDiode);
+
+            // Sturdy cast iron wheels
+            for (let side = -1; side <= 1; side += 2) {
+              for (let tIdx = -1.1; tIdx <= 1.1; tIdx += 1.1) {
+                const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.16, 6), structuralHull);
+                wh.rotation.z = Math.PI / 2;
+                wh.position.set(side * 0.54, 0.15, tIdx * 0.48);
+                g.add(wh);
+              }
+            }
+
+          } else {
+            // "Нано-Био Формовщик «Прядильщик»" - Floating insectoid multi-claw nanite weaver
+            const centralOrganicHead = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 8), dynamicCoating);
+            centralOrganicHead.position.set(0, 0.62, 0);
+            g.add(centralOrganicHead);
+
+            const floatingEnergyRing = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.06, 4, 12), glowingCore);
+            floatingEnergyRing.rotation.x = Math.PI / 2;
+            floatingEnergyRing.position.set(0, 0.52, 0);
+            g.add(floatingEnergyRing);
+
+            const chemicalSacBack = new THREE.Mesh(new THREE.SphereGeometry(0.26, 6, 6), glowingCore);
+            chemicalSacBack.position.set(0, 0.72, -0.32);
+            g.add(chemicalSacBack);
+
+            // 4 Bio-mechanical multi-segment crawling legs
+            [[-0.4, -0.4], [0.4, -0.4], [-0.4, 0.4], [0.4, 0.4]].forEach(([lx, lz]) => {
+              const legLeg = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.6, 4), structuralHull);
+              legLeg.rotation.z = lx > 0 ? 0.3 : -0.3;
+              legLeg.rotation.x = lz > 0 ? 0.15 : -0.15;
+              legLeg.position.set(lx, 0.28, lz);
+              g.add(legLeg);
+            });
           }
 
         } else if (ent.subType === 'harvester') {
-          // Double-cylinder high payload raw petroleum resource logistics carrier
-          const carrierTruckBed = new THREE.Mesh(
-            new THREE.BoxGeometry(1.15, 0.28, 1.9),
-            vehicleHull
-          );
-          carrierTruckBed.position.y = 0.14;
-          carrierTruckBed.castShadow = true;
-          carrierTruckBed.receiveShadow = true;
-          g.add(carrierTruckBed);
+          // --- FACTION SPECIFIC HARVESTER 3D MODEL DESIGNS ---
+          if (faction === 'Alliance') {
+            // "Квантовый Сборщик «Хронос»" - Ultra-modern hover cargo rig with glowing plasma cells
+            const mainBody = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.25, 1.7), vehicleHull);
+            mainBody.position.y = 0.22;
+            g.add(mainBody);
 
-          // Armored Forward Driver Cabin with glowing windows
-          const driverCab = new THREE.Mesh(
-            new THREE.BoxGeometry(1.05, 0.58, 0.65),
-            structuralHull
-          );
-          driverCab.position.set(0, 0.5, 0.65);
-          g.add(driverCab);
+            const sleekHoverCapsule = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.4, 0.6), structuralHull);
+            sleekHoverCapsule.position.set(0, 0.45, 0.5);
+            g.add(sleekHoverCapsule);
 
-          const glassShield = new THREE.Mesh(
-            new THREE.BoxGeometry(0.9, 0.22, 0.03),
-            glowingCore
-          );
-          glassShield.position.set(0, 0.55, 0.98);
-          g.add(glassShield);
+            const blueVisorGlass = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.18, 0.05), glowingCore);
+            blueVisorGlass.position.set(0, 0.5, 0.81);
+            g.add(blueVisorGlass);
 
-          // Giant cylindrical heavy duty storage refinery tanks on the back!
-          const tankLeft = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.35, 0.35, 1.1, 10),
-            new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.9, roughness: 0.1 })
-          );
-          tankLeft.rotation.x = Math.PI/2;
-          tankLeft.position.set(-0.3, 0.44, -0.25);
-          g.add(tankLeft);
+            // Dual glowing cylinder quantum capsules for clean resources
+            const quantTankL = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.9, 8), glowingCore);
+            quantTankL.rotation.x = Math.PI / 2;
+            quantTankL.position.set(-0.28, 0.42, -0.35);
+            g.add(quantTankL);
 
-          const tankRight = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.35, 0.35, 1.1, 10),
-            new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.9, roughness: 0.1 })
-          );
-          tankRight.rotation.x = Math.PI/2;
-          tankRight.position.set(0.3, 0.44, -0.25);
-          g.add(tankRight);
+            const quantTankR = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.9, 8), glowingCore);
+            quantTankR.rotation.x = Math.PI / 2;
+            quantTankR.position.set(0.28, 0.42, -0.35);
+            g.add(quantTankR);
 
-          // Spinny flashing hazard orange beacon on truck head
-          const warningDome = new THREE.Mesh(
-            new THREE.SphereGeometry(0.08, 6, 6),
-            new THREE.MeshBasicMaterial({ color: '#fbbf24' })
-          );
-          warningDome.position.set(0, 0.82, 0.55);
-          g.add(warningDome);
+            // Hover jets
+            [[-0.5, -0.6], [0.5, -0.6], [-0.5, 0.6], [0.5, 0.6]].forEach(([hx, hz]) => {
+              const hoverRing = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.035, 4, 10), glowingCore);
+              hoverRing.rotation.x = Math.PI / 2;
+              hoverRing.position.set(hx, 0.1, hz);
+              g.add(hoverRing);
+            });
 
-          // Heavy offroad dual wheel sets
-          for (let side = -1; side <= 1; side += 2) {
-            for (let wIdx = -1.2; wIdx <= 1.2; wIdx += 0.8) {
-              const wheelT = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.22, 0.22, 0.18, 8),
-                new THREE.MeshStandardMaterial({ color: '#020617', roughness: 0.95 })
-              );
-              wheelT.rotation.z = Math.PI / 2;
-              wheelT.position.set(side * 0.62, 0.1, wIdx * 0.48);
-              g.add(wheelT);
+          } else if (faction === 'Coalition') {
+            // "Тяжелый Рудовоз «Урал-Э»" - Mega Ural-E dumper with triple massive rubber tires
+            const bedBlock = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 2.0), vehicleHull);
+            bedBlock.position.y = 0.2;
+            g.add(bedBlock);
+
+            const hugeTruckCab = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.55, 0.7), structuralHull);
+            hugeTruckCab.position.set(0, 0.55, 0.65);
+            g.add(hugeTruckCab);
+
+            const redGlowFilter = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.18, 0.05), glowingCore);
+            redGlowFilter.position.set(0, 0.6, 1.01);
+            g.add(redGlowFilter);
+
+            // Giant heavy duty industrial petroleum silos
+            const giantSiloL = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 1.15, 8), structuralHull);
+            giantSiloL.rotation.x = Math.PI / 2;
+            giantSiloL.position.set(-0.3, 0.5, -0.25);
+            g.add(giantSiloL);
+
+            const giantSiloR = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 1.15, 8), structuralHull);
+            giantSiloR.rotation.x = Math.PI / 2;
+            giantSiloR.position.set(0.3, 0.5, -0.25);
+            g.add(giantSiloR);
+
+            const warningLightS = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 6), glowingCore);
+            warningLightS.position.set(0, 0.88, 0.65);
+            g.add(warningLightS);
+
+            // Triple wheels sets for high payloads
+            for (let side = -1; side <= 1; side += 2) {
+              for (let wz = -0.7; wz <= 0.7; wz += 0.7) {
+                const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.18, 8), structuralHull);
+                tire.rotation.z = Math.PI / 2;
+                tire.position.set(side * 0.64, 0.12, wz);
+                g.add(tire);
+              }
             }
+
+          } else if (faction === 'Union') {
+            // "Гусеничный Трак ПС-4" - Tracked heavy dumper tank with single large horizontal petroleum pod
+            const trackBedUnion = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.25, 1.8), vehicleHull);
+            trackBedUnion.position.y = 0.25;
+            g.add(trackBedUnion);
+
+            const smallDriverSideCabin = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.55), structuralHull);
+            smallDriverSideCabin.position.set(-0.25, 0.5, 0.6);
+            g.add(smallDriverSideCabin);
+
+            const greenWindowGlow = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.18, 0.05), glowingCore);
+            greenWindowGlow.position.set(-0.25, 0.52, 0.88);
+            g.add(greenWindowGlow);
+
+            // Single enormous central oil extraction silo cylinder
+            const centralHugeContainerTank = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 1.3), dynamicCoating);
+            centralHugeContainerTank.rotation.x = Math.PI / 2;
+            centralHugeContainerTank.position.set(0.12, 0.48, -0.22);
+            g.add(centralHugeContainerTank);
+
+            // Sturdy dual wide black crawler tracks
+            for (let side = -1; side <= 1; side += 2) {
+              const crawlerUnion = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.34, 1.7), structuralHull);
+              crawlerUnion.position.set(side * 0.56, 0.17, 0);
+              g.add(crawlerUnion);
+            }
+
+          } else {
+            // "Био-Сифон «Токсин-Т6»" - Insectoid spider oil carrier with green chemical fluid abdomen
+            const thoraxSaddle = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), structuralHull);
+            thoraxSaddle.position.set(0, 0.55, 0.35);
+            g.add(thoraxSaddle);
+
+            const toxicGlowBallAbdomen = new THREE.Mesh(new THREE.SphereGeometry(0.48, 8, 8), glowingCore);
+            toxicGlowBallAbdomen.scale.set(0.8, 0.8, 1.3);
+            toxicGlowBallAbdomen.position.set(0, 0.45, -0.32);
+            g.add(toxicGlowBallAbdomen);
+
+            // Insect biological scanner antenna pins
+            const ant1 = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4), glowingCore);
+            ant1.rotation.set(0.3, 0.3, 0);
+            ant1.position.set(0.1, 0.72, 0.52);
+            g.add(ant1);
+
+            const ant2 = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4), glowingCore);
+            ant2.rotation.set(0.3, -0.3, 0);
+            ant2.position.set(-0.1, 0.72, 0.52);
+            g.add(ant2);
+
+            // Spider side legs
+            [[-0.45, -0.4], [0.45, -0.4], [-0.45, 0.4], [0.45, 0.4]].forEach(([sx, sz]) => {
+              const spLeg = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.55, 4), structuralHull);
+              spLeg.rotation.z = sx > 0 ? 0.35 : -0.35;
+              spLeg.position.set(sx, 0.25, sz);
+              g.add(spLeg);
+            });
           }
         }
       }
@@ -1985,6 +2142,12 @@ export default function RTSGameCanvas({
     const mouseDownPos = { x: 0, y: 0 };
     let isMouseDown = false;
     let selectBoxActive = false;
+
+    // Touch event tracking
+    let isTouching = false;
+    const touchStartPos = { x: 0, y: 0 };
+    const touchLastPos = { x: 0, y: 0 };
+    let touchHasDragged = false;
 
     // Build placement helper bounding cube (colored green if valid placement coordinates)
     const placeBoxGeo = new THREE.BoxGeometry(2.5, 1.2, 2.5);
@@ -2205,49 +2368,79 @@ export default function RTSGameCanvas({
       const bProps = getBuildingProps(bType, playerId, sim.players);
       const cost = bProps.cost;
       if (sim.credits < cost) {
-        pushNotification('Insufficient funds to deploy building structures!', 'warn');
+        pushNotification('Недостаточно средств для развертывания строения!', 'warn');
         sim.buildingToPlace = null;
         setBuildingToPlace(null);
         return;
+      }
+
+      // Check alignment of nearest strategic oil wells for resource snap zone:
+      let snappedSpot = null;
+      let minSpotDist = 4.5; // Highly generous snapping radius
+      if (map && map.resourceSpots) {
+        map.resourceSpots.forEach(spot => {
+          const d = Math.sqrt((spot.x - x)*(spot.x - x) + (spot.z - z)*(spot.z - z));
+          if (d < minSpotDist) {
+            minSpotDist = d;
+            snappedSpot = spot;
+          }
+        });
+      }
+
+      // Snap coordinates if near a strategic well zone
+      let targetX = x;
+      let targetZ = z;
+      if (snappedSpot) {
+        targetX = snappedSpot.x;
+        targetZ = snappedSpot.z;
       }
 
       // Check if location is clear of rivers/hills or other buildings
-      if (map.nodes[x] === undefined || map.nodes[x][z] === undefined) return;
-      const node = map.nodes[x][z];
+      if (map.nodes[targetX] === undefined || map.nodes[targetX][targetZ] === undefined) return;
+      const node = map.nodes[targetX][targetZ];
       
       let blockedVal = false;
-      if (node.type === 'water' || node.height > 1) blockedVal = true;
-      
-      // Can't place refinery over blank ground unless there is a resource Oil derrick spot there!
-      if (bType === 'supply_refinery' && !node.resourceSpot) {
-        pushNotification('Oil refineries can only be placed directly over strategic Oil Wells (Yellow towers)!', 'warn');
-        sim.buildingToPlace = null;
-        setBuildingToPlace(null);
-        return;
+      // Generously bypass water bodies and hill height clamps if building on a snapped resource location!
+      if (!snappedSpot && (node.type === 'water' || node.height > 1)) {
+        blockedVal = true;
       }
+      
+      // Can't place refinery over blank ground unless there is a valid resource spot snapped!
+      if (bType === 'supply_refinery') {
+        if (snappedSpot) {
+          node.resourceSpot = true;
+        } else {
+          pushNotification('Центры снабжения (Нефтезаводы) можно строить только непосредственно на нефтяных скважинах (желтые вышки)!', 'warn');
+          sim.buildingToPlace = null;
+          setBuildingToPlace(null);
+          return;
+        }
+      }
+
+      const buildingId = `b_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
       // Check structural intersections
       sim.entities.forEach(ent => {
-        if (ent.state === 'dead') return;
-        const dx = Math.abs(ent.x - x);
-        const dz = Math.abs(ent.z - z);
+        if (ent.state === 'dead' || ent.id === buildingId) return;
+        const dx = Math.abs(ent.x - targetX);
+        const dz = Math.abs(ent.z - targetZ);
         if (ent.type === 'building' && dx < 3.0 && dz < 3.0) {
-          blockedVal = true;
+          if (ent.state !== 'dead') {
+            blockedVal = true;
+          }
         }
       });
 
       if (blockedVal) {
-        pushNotification('Terrain occupied or blocked. Deployment path interrupted.', 'warn');
+        pushNotification('Эта зона занята или заблокирована ландшафтом!', 'warn');
         return;
       }
 
-      // Create local building object
-      const buildingId = `b_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
       const pObj: GameActionEvent = {
         event: 'build',
         buildingType: bType,
-        x,
-        z,
+        x: targetX,
+        z: targetZ,
         id: buildingId
       };
 
@@ -2264,8 +2457,8 @@ export default function RTSGameCanvas({
         team: selfPlayer.team,
         health: bProps.hp,
         maxHealth: bProps.hp,
-        x,
-        z,
+        x: targetX,
+        z: targetZ,
         angle: 0,
         state: 'constructing',
         buildProgress: 0.05
@@ -2282,8 +2475,8 @@ export default function RTSGameCanvas({
         selectedBuilders.forEach(b => {
           b.state = 'moving';
           // Move slightly spaced from center
-          b.targetX = x + (Math.random() - 0.5) * 1.5;
-          b.targetZ = z + (Math.random() - 0.5) * 1.5;
+          b.targetX = targetX + (Math.random() - 0.5) * 1.5;
+          b.targetZ = targetZ + (Math.random() - 0.5) * 1.5;
         });
         pushNotification(`Юнитам-строителям отправлены координаты объекта!`, 'info');
       } else {
@@ -2296,15 +2489,15 @@ export default function RTSGameCanvas({
           let closestB = anyBuilders[0];
           let minDistSq = 999999;
           anyBuilders.forEach(b => {
-            const dSq = (b.x - x)*(b.x - x) + (b.z - z)*(b.z - z);
+            const dSq = (b.x - targetX)*(b.x - targetX) + (b.z - targetZ)*(b.z - targetZ);
             if (dSq < minDistSq) {
               minDistSq = dSq;
               closestB = b;
             }
           });
           closestB.state = 'moving';
-          closestB.targetX = x + (Math.random() - 0.5) * 1.5;
-          closestB.targetZ = z + (Math.random() - 0.5) * 1.5;
+          closestB.targetX = targetX + (Math.random() - 0.5) * 1.5;
+          closestB.targetZ = targetZ + (Math.random() - 0.5) * 1.5;
           pushNotification(`Ближайший строительный комплекс выдвигается на стройплощадку!`, 'info');
         } else {
           pushNotification(`Внимание: Нет свободных Строителей! Закажите инженера в Штабе Командования.`, 'warn');
@@ -2650,10 +2843,178 @@ export default function RTSGameCanvas({
     };
     window.addEventListener('resize', handleResize);
 
+    // Touch event implementations
+    let lastTouchEndTime = 0;
+    const lastTouchEndPos = { x: 0, y: 0 };
+    let isDoubleTapHolding = false;
+    const doubleTapStartPos = { x: 0, y: 0 };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 0) return;
+      isTouching = true;
+
+      const clickX = e.touches[0].clientX;
+      const clickY = e.touches[0].clientY;
+
+      touchStartPos.x = clickX;
+      touchStartPos.y = clickY;
+      touchLastPos.x = clickX;
+      touchLastPos.y = clickY;
+      touchHasDragged = false;
+
+      const now = Date.now();
+      const timeDiff = now - lastTouchEndTime;
+      const dist = Math.sqrt(
+        (clickX - lastTouchEndPos.x) * (clickX - lastTouchEndPos.x) +
+        (clickY - lastTouchEndPos.y) * (clickY - lastTouchEndPos.y)
+      );
+
+      // Identify second tap of double-tap starting within 300ms and close to first tap
+      if (timeDiff < 300 && dist < 40) {
+        isDoubleTapHolding = true;
+        doubleTapStartPos.x = clickX;
+        doubleTapStartPos.y = clickY;
+      } else {
+        isDoubleTapHolding = false;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isTouching || e.touches.length === 0) return;
+      const currentTouchX = e.touches[0].clientX;
+      const currentTouchY = e.touches[0].clientY;
+
+      const dragDist = Math.sqrt(
+        (currentTouchX - touchStartPos.x) * (currentTouchX - touchStartPos.x) +
+        (currentTouchY - touchStartPos.y) * (currentTouchY - touchStartPos.y)
+      );
+      if (dragDist > 10) {
+        touchHasDragged = true;
+      }
+
+      const deltaX = currentTouchX - touchLastPos.x;
+      const deltaY = currentTouchY - touchLastPos.y;
+
+      touchLastPos.x = currentTouchX;
+      touchLastPos.y = currentTouchY;
+
+      if (isDoubleTapHolding) {
+        // Dragging selection box
+        setDragSelection({
+          x1: doubleTapStartPos.x,
+          y1: doubleTapStartPos.y,
+          x2: currentTouchX,
+          y2: currentTouchY
+        });
+      } else {
+        // Scrolling camera around map
+        const sim = simulationRef.current;
+        if (sim) {
+          const cosRot = Math.cos(sim.camRotation);
+          const sinRot = Math.sin(sim.camRotation);
+          const factor = 0.05 * (sim.camZoom / 18);
+
+          sim.camX += (cosRot * deltaX + sinRot * deltaY) * factor;
+          sim.camZ -= (sinRot * deltaX - cosRot * deltaY) * factor;
+
+          if (sim.map) {
+            sim.camX = Math.max(0, Math.min(sim.map.size, sim.camX));
+            sim.camZ = Math.max(0, Math.min(sim.map.size, sim.camZ));
+          }
+        }
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      isTouching = false;
+      const now = Date.now();
+      const bounds = renderer.domElement.getBoundingClientRect();
+
+      if (isDoubleTapHolding) {
+        isDoubleTapHolding = false;
+        setDragSelection(null);
+
+        if (touchHasDragged) {
+          // Drag selection box finished
+          handleDragSelection(doubleTapStartPos, touchLastPos);
+        } else {
+          // Double-tap on unit/building -> Select it!
+          mouse.x = ((touchStartPos.x - bounds.left) / bounds.width) * 2 - 1;
+          mouse.y = -((touchStartPos.y - bounds.top) / bounds.height) * 2 + 1;
+
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObject(terrainMesh);
+
+          if (intersects.length > 0) {
+            const pt = intersects[0].point;
+            const hitEntity = findEntityAt(pt.x, pt.z, 2.5);
+            const sim = simulationRef.current;
+            if (sim) {
+              if (hitEntity && hitEntity.playerId === playerId) {
+                sim.selectedIds = [hitEntity.id];
+                sound.playSelect();
+              } else {
+                sim.selectedIds = [];
+              }
+            }
+          }
+        }
+      } else {
+        // Single tap -> Action Order or placing building/power
+        if (!touchHasDragged) {
+          mouse.x = ((touchStartPos.x - bounds.left) / bounds.width) * 2 - 1;
+          mouse.y = -((touchStartPos.y - bounds.top) / bounds.height) * 2 + 1;
+
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObject(terrainMesh);
+
+          if (intersects.length > 0) {
+            const pt = intersects[0].point;
+            const mapX = Math.round(pt.x);
+            const mapZ = Math.round(pt.z);
+
+            const sim = simulationRef.current;
+            if (sim) {
+              if (sim.buildingToPlace) {
+                triggerConstructionAction(sim.buildingToPlace, mapX, mapZ);
+                setIsMenuCollapsed(true);
+              } else if (sim.commandStrikeActive) {
+                triggerCommandStrikeAction(mapX, mapZ);
+                setIsMenuCollapsed(true);
+              } else if (sim.selectedIds.length > 0) {
+                const clickedTarget = findEntityAt(pt.x, pt.z, 2.5);
+                if (clickedTarget && clickedTarget.playerId !== playerId) {
+                  // Attack order
+                  triggerAttackAction(sim.selectedIds, clickedTarget.id, clickedTarget.type);
+                  setIsMenuCollapsed(true);
+                } else {
+                  // Move order
+                  triggerMovementAction(sim.selectedIds, pt.x, pt.z);
+
+                  const beaconElev = getTerrainHeight(pt.x, pt.z, map);
+                  beaconMesh.position.set(pt.x, beaconElev + 0.15, pt.z);
+                  beaconMesh.visible = true;
+                  setTimeout(() => { beaconMesh.visible = false; }, 850);
+                  setIsMenuCollapsed(true);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      lastTouchEndTime = now;
+      lastTouchEndPos.x = touchStartPos.x;
+      lastTouchEndPos.y = touchStartPos.y;
+    };
+
     const canvasDom = renderer.domElement;
     canvasDom.addEventListener('mousedown', handleMouseDown);
     canvasDom.addEventListener('mousemove', handleMouseMoveSelection);
     canvasDom.addEventListener('mouseup', handleMouseUp);
+    canvasDom.addEventListener('touchstart', handleTouchStart, { passive: true });
+    canvasDom.addEventListener('touchmove', handleTouchMove, { passive: true });
+    canvasDom.addEventListener('touchend', handleTouchEnd);
     canvasDom.addEventListener('contextmenu', (e) => e.preventDefault()); // Stop native popup right clicks
 
     // 8. Main Animation Frame & RTS Simulation Tick loop
@@ -2922,7 +3283,7 @@ export default function RTSGameCanvas({
               });
             }
           } else {
-            // Slow passive rate if no builder is present
+            // Both AI and player need active builders to construct structures! No passive materialized bases are allowed without constructors.
             ent.buildProgress = (ent.buildProgress || 0) + 0.0001;
           }
 
@@ -3329,10 +3690,17 @@ export default function RTSGameCanvas({
                 } else if (pType === 'rocket') {
                   const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.6, 6), new THREE.MeshStandardMaterial({ color: '#4b5563' }));
                   m.rotation.x = Math.PI / 2;
+
+                  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.2, 6), new THREE.MeshStandardMaterial({ color: '#f59e0b' }));
+                  tip.position.z = 0.4;
+                  tip.rotation.x = Math.PI / 2;
+
                   const fire = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.01, 0.3, 4), new THREE.MeshBasicMaterial({ color: pColor }));
-                  fire.position.z = 0.4;
+                  fire.position.z = -0.4;
                   fire.rotation.x = Math.PI / 2;
+
                   pMesh.add(m);
+                  pMesh.add(tip);
                   pMesh.add(fire);
                 } else {
                   // machinegun
@@ -3533,6 +3901,16 @@ export default function RTSGameCanvas({
         p.life -= 0.02;
         if (p.life <= 0) {
           scene.remove(p.mesh);
+          if (p.mesh) {
+            if (p.mesh.geometry) p.mesh.geometry.dispose();
+            if (p.mesh.material) {
+              if (Array.isArray(p.mesh.material)) {
+                p.mesh.material.forEach((m: any) => m.dispose());
+              } else {
+                p.mesh.material.dispose();
+              }
+            }
+          }
           explosionParticles.splice(i, 1);
         }
       }
@@ -3649,6 +4027,50 @@ export default function RTSGameCanvas({
           const aiCc = sim.entities.find(e => e.playerId === p.id && e.subType === 'command_center' && e.state !== 'dead');
           if (!aiCc) return; // AI is defeated!
 
+          // Helper to task AI builders to move and construct
+          const taskAiBuilders = (pId: string, tx: number, tz: number) => {
+            const builders = sim.entities.filter(b => b.playerId === pId && b.subType === 'builder' && b.state !== 'dead');
+            builders.forEach(b => {
+              b.state = 'moving';
+              b.targetX = tx + (Math.random() - 0.5) * 1.5;
+              b.targetZ = tz + (Math.random() - 0.5) * 1.5;
+            });
+          };
+
+          // Respawn AI builder at CommandCenter if they have none
+          let aliveBuilders = sim.entities.filter(e => e.playerId === p.id && e.subType === 'builder' && e.state !== 'dead');
+          if (aliveBuilders.length === 0) {
+            const uProps = getUnitProps('builder', p.id, sim.players);
+            sim.entities.push({
+              id: `ai_builder_respawn_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+              type: 'unit',
+              subType: 'builder',
+              playerId: p.id,
+              team: p.team,
+              health: uProps.hp,
+              maxHealth: uProps.hp,
+              x: aiCc.x + (Math.random() - 0.5) * 3,
+              z: aiCc.z + 3,
+              angle: Math.PI,
+              state: 'idle'
+            });
+            pushNotification(`Генерал ИИ подготовил новый инженерно-строительный комплекс!`, 'info');
+            aliveBuilders = sim.entities.filter(e => e.playerId === p.id && e.subType === 'builder' && e.state !== 'dead');
+          }
+
+          // Direct idle or wandering builders to construct any current building projects
+          const currentConstructs = sim.entities.filter(e => e.playerId === p.id && e.type === 'building' && e.state === 'constructing');
+          if (currentConstructs.length > 0) {
+            aliveBuilders.forEach(b => {
+              if (b.state === 'idle') {
+                const targetC = currentConstructs[0];
+                b.state = 'moving';
+                b.targetX = targetC.x + (Math.random() - 0.5) * 1.5;
+                b.targetZ = targetC.z + (Math.random() - 0.5) * 1.5;
+              }
+            });
+          }
+
           // Initialize AI State for this player if none exists
           if (!sim.aiStates[p.id]) {
             sim.aiStates[p.id] = {
@@ -3670,12 +4092,12 @@ export default function RTSGameCanvas({
           // --- 1. BASE BUILDING STATE MACHINE ---
           if (aiState.phase === 'build_base') {
             // Build structures step-by-step with real construction animation progress!
-            if (powerPlants.length === 0 && aiState.timer >= 10) {
+            if (powerPlants.length === 0 && aliveBuilders.length > 0 && aiState.timer >= 10) {
               const bx = aiCc.x - 5;
               const bz = aiCc.z - 2;
               const bProps = getBuildingProps('power_plant', p.id, sim.players);
               sim.entities.push({
-                id: `ai_pp_${Date.now()}`,
+                id: `ai_pp_${Date.now()}_${Math.floor(Math.random() * 1000000)}`,
                 type: 'building',
                 subType: 'power_plant',
                 playerId: p.id,
@@ -3689,12 +4111,13 @@ export default function RTSGameCanvas({
                 buildProgress: 0.05
               });
               pushNotification(`Зафиксирована тепловая сигнатура постройки противника!`, 'info');
+              taskAiBuilders(p.id, bx, bz);
             }
 
-            else if (refineries.length === 0 && powerPlants.length > 0 && aiState.timer >= 25) {
+            else if (refineries.length === 0 && powerPlants.length > 0 && aliveBuilders.length > 0 && aiState.timer >= 25) {
               // Find closest strategic derrick
               let nearestDerrick: { x: number; z: number } | null = null;
-              let dSqMin = 45 * 45;
+              let dSqMin = 999999;
               map.resourceSpots.forEach(spot => {
                 let occ = false;
                 sim.entities.forEach(ent => {
@@ -3714,7 +4137,7 @@ export default function RTSGameCanvas({
               if (nearestDerrick) {
                 const bProps = getBuildingProps('supply_refinery', p.id, sim.players);
                 sim.entities.push({
-                  id: `ai_ref_${Date.now()}`,
+                  id: `ai_ref_${Date.now()}_${Math.floor(Math.random() * 1000000)}`,
                   type: 'building',
                   subType: 'supply_refinery',
                   playerId: p.id,
@@ -3728,15 +4151,16 @@ export default function RTSGameCanvas({
                   buildProgress: 0.05
                 });
                 pushNotification(`Вражеский снабженец разворачивает нефтевышку!`, 'info');
+                taskAiBuilders(p.id, (nearestDerrick as any).x, (nearestDerrick as any).z);
               }
             }
 
-            else if (!barracks && refineries.length > 0 && aiState.timer >= 45) {
+            else if (!barracks && refineries.length > 0 && aliveBuilders.length > 0 && aiState.timer >= 45) {
               const bx = aiCc.x + 4;
               const bz = aiCc.z - 4;
               const bProps = getBuildingProps('barracks', p.id, sim.players);
               sim.entities.push({
-                id: `ai_b_${Date.now()}`,
+                id: `ai_b_${Date.now()}_${Math.floor(Math.random() * 1000000)}`,
                 type: 'building',
                 subType: 'barracks',
                 playerId: p.id,
@@ -3750,14 +4174,15 @@ export default function RTSGameCanvas({
                 buildProgress: 0.05
               });
               pushNotification(`Разведка докладывает о постройке вражеских казарм!`, 'info');
+              taskAiBuilders(p.id, bx, bz);
             }
 
-            else if (barracks && !warFactories && aiState.timer >= 65) {
+            else if (barracks && !warFactories && aliveBuilders.length > 0 && aiState.timer >= 65) {
               const bx = aiCc.x - 3;
               const bz = aiCc.z + 5;
               const bProps = getBuildingProps('war_factory', p.id, sim.players);
               sim.entities.push({
-                id: `ai_wf_${Date.now()}`,
+                id: `ai_wf_${Date.now()}_${Math.floor(Math.random() * 1000000)}`,
                 type: 'building',
                 subType: 'war_factory',
                 playerId: p.id,
@@ -3771,15 +4196,16 @@ export default function RTSGameCanvas({
                 buildProgress: 0.05
               });
               pushNotification(`Замечена закладка фундамента тяжелого военного завода врага!`, 'info');
+              taskAiBuilders(p.id, bx, bz);
             }
 
-            else if (warFactories && turrets.length === 0 && aiState.timer >= 90) {
+            else if (warFactories && turrets.length === 0 && aliveBuilders.length > 0 && aiState.timer >= 90) {
               // Build standard defensive turret guarding the front
               const bx = aiCc.x + 3;
               const bz = aiCc.z + 4;
               const bProps = getBuildingProps('defense_turret', p.id, sim.players);
               sim.entities.push({
-                id: `ai_tur_${Date.now()}`,
+                id: `ai_tur_${Date.now()}_${Math.floor(Math.random() * 1000000)}`,
                 type: 'building',
                 subType: 'defense_turret',
                 playerId: p.id,
@@ -3793,6 +4219,7 @@ export default function RTSGameCanvas({
                 buildProgress: 0.05
               });
               pushNotification(`Генерал ИИ разворачивает защитную турель для охраны периметра!`, 'info');
+              taskAiBuilders(p.id, bx, bz);
             }
 
             // Transition after building phase completes
@@ -3809,7 +4236,7 @@ export default function RTSGameCanvas({
               const utToSpawn: UnitType = Math.random() > 0.5 ? 'drone_scout' : 'drone_kamikaze';
               const uProps = getUnitProps(utToSpawn, p.id, sim.players);
               sim.entities.push({
-                id: `ai_u_${Date.now()}_r`,
+                id: `ai_u_${Date.now()}_r_${Math.floor(Math.random() * 1000000)}`,
                 type: 'unit',
                 subType: utToSpawn,
                 playerId: p.id,
@@ -3828,7 +4255,7 @@ export default function RTSGameCanvas({
               const utToSpawn: UnitType = Math.random() > 0.65 ? 'artillery_mlrs' : 'precision_tank';
               const uProps = getUnitProps(utToSpawn, p.id, sim.players);
               sim.entities.push({
-                id: `ai_u_${Date.now()}_rt`,
+                id: `ai_u_${Date.now()}_rt_${Math.floor(Math.random() * 1000000)}`,
                 type: 'unit',
                 subType: utToSpawn,
                 playerId: p.id,
@@ -3873,10 +4300,15 @@ export default function RTSGameCanvas({
               sound.playAlert();
             }
 
-            // Identify Player target priorities
+            // Identify hostile target priorities belonging to different teams
             if (aiState.phase === 'strike_defenses') {
-              // Try to locate player's defensive turrets first to breach perimeter
-              const targetDef = sim.entities.find(e => e.playerId === playerId && e.subType === 'defense_turret' && e.state !== 'dead');
+              // Try to locate any opposing team's defensive turrets first to breach perimeter
+              const targetDef = sim.entities.find(e => {
+                if (e.state === 'dead' || e.type !== 'building' || e.subType !== 'defense_turret') return false;
+                const entPlayer = sim.players.find(pl => pl.id === e.playerId) || selfPlayer;
+                return entPlayer.team !== p.team;
+              });
+
               if (targetDef) {
                 idleArmy.forEach(u => {
                   if (u.state !== 'attacking' || u.targetId !== targetDef.id) {
@@ -3892,11 +4324,20 @@ export default function RTSGameCanvas({
             }
 
             if (aiState.phase === 'strike_base') {
-              // Locate primary CommandCenter, refineries or barracks to dismantle
-              const playerCc = sim.entities.find(e => e.playerId === playerId && e.subType === 'command_center' && e.state !== 'dead');
-              const playerProd = sim.entities.find(e => e.playerId === playerId && (e.subType === 'war_factory' || e.subType === 'barracks') && e.state !== 'dead');
+              // Locate any opposing team's primary CommandCenter, refineries or barracks to dismantle
+              const enemyCc = sim.entities.find(e => {
+                if (e.state === 'dead' || e.type !== 'building' || e.subType !== 'command_center') return false;
+                const entPlayer = sim.players.find(pl => pl.id === e.playerId) || selfPlayer;
+                return entPlayer.team !== p.team;
+              });
+
+              const enemyProd = sim.entities.find(e => {
+                if (e.state === 'dead' || e.type !== 'building' || !['war_factory', 'barracks'].includes(e.subType || '')) return false;
+                const entPlayer = sim.players.find(pl => pl.id === e.playerId) || selfPlayer;
+                return entPlayer.team !== p.team;
+              });
               
-              const finalObjective = playerCc || playerProd;
+              const finalObjective = enemyCc || enemyProd;
               if (finalObjective) {
                 idleArmy.forEach(u => {
                   if (u.state !== 'attacking') {
@@ -3937,9 +4378,6 @@ export default function RTSGameCanvas({
         setPowerGenerated(cacheGen);
         setPowerRequired(cacheReq);
 
-        // Sync camera coordinates with React to update minimap frame outline
-        setCamPos({ x: sim.camX, z: sim.camZ, zoom: sim.camZoom });
-
         // Slow charge Commander powers
         if (sim.commandCharge < 100) {
           sim.commandCharge = Math.min(100, sim.commandCharge + 1);
@@ -3970,6 +4408,18 @@ export default function RTSGameCanvas({
         }
       }
 
+      // Real-time smooth synchronizing of camera coordinates with Minimap on actual movement
+      if (tickCount % 4 === 0) {
+        if (Math.abs(sim.camX - lastSentCamX) > 0.05 || 
+            Math.abs(sim.camZ - lastSentCamZ) > 0.05 || 
+            Math.abs(sim.camZoom - lastSentCamZoom) > 0.05) {
+          lastSentCamX = sim.camX;
+          lastSentCamZ = sim.camZ;
+          lastSentCamZoom = sim.camZoom;
+          setCamPos({ x: sim.camX, z: sim.camZ, zoom: sim.camZoom });
+        }
+      }
+
       // Sync active selections periodically with React states
       if (tickCount % 12 === 0) {
         setSelectedEntityIds([...sim.selectedIds]);
@@ -3986,6 +4436,9 @@ export default function RTSGameCanvas({
       canvasDom.removeEventListener('mousedown', handleMouseDown);
       canvasDom.removeEventListener('mousemove', handleMouseMoveSelection);
       canvasDom.removeEventListener('mouseup', handleMouseUp);
+      canvasDom.removeEventListener('touchstart', handleTouchStart);
+      canvasDom.removeEventListener('touchmove', handleTouchMove);
+      canvasDom.removeEventListener('touchend', handleTouchEnd);
       if (socketRef.current) {
         socketRef.current.removeEventListener('message', handleSocketMessage);
       }
@@ -4102,7 +4555,7 @@ export default function RTSGameCanvas({
     const pz = (e.clientY - box.top) / box.height;
 
     const sim = simulationRef.current;
-    sim.camX = px * lobby.mapSize;
+    sim.camX = (1 - px) * lobby.mapSize;
     sim.camZ = (1 - pz) * lobby.mapSize; // vertical flip match
     sound.playClick();
   };
@@ -4137,7 +4590,7 @@ export default function RTSGameCanvas({
       {/* Top HUD Controls Panel bar */}
       <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none z-20">
         {/* Cash flow index card */}
-        <div className="bg-slate-900/80 border border-slate-800 backdrop-blur-md p-3 px-5 rounded-lg flex items-center gap-6 pointer-events-auto shadow-lg shadow-black/40">
+        <div className="bg-slate-950/90 border border-slate-800/80 backdrop-blur-md p-3 px-5 rounded-lg flex items-center gap-6 pointer-events-auto shadow-lg shadow-black/40">
           <div>
             <p className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">БЮДЖЕТ</p>
             <p className="text-xl font-bold font-mono text-emerald-400">⟨${credits}⟩</p>
@@ -4150,61 +4603,61 @@ export default function RTSGameCanvas({
           </div>
         </div>
 
-        {/* Tactical Alerts center logs */}
-        <div className="hidden md:flex flex-col gap-1.5 max-w-sm pointer-events-none items-end">
-          {notifications.map(n => (
-            <div
-              key={n.id}
-              className={`p-2.5 px-4 rounded text-xs font-mono border backdrop-blur-md transition-all duration-300 animate-slide-in ${
-                n.type === 'warn'
-                  ? 'bg-rose-950/40 border-rose-800 text-rose-300'
-                  : n.type === 'success'
-                  ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
-                  : 'bg-slate-900/80 border-slate-800 text-cyan-200'
-              }`}
-            >
-              {n.text}
-            </div>
-          ))}
-        </div>
-
         {/* Quick Back arrow */}
         <button
           onClick={onExitGame}
-          className="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 backdrop-blur px-4 py-2 text-xs font-mono uppercase font-bold text-slate-300 hover:text-slate-100 rounded-lg pointer-events-auto transition cursor-pointer"
+          className="bg-slate-950/90 hover:bg-slate-800 border border-slate-800 backdrop-blur px-4 py-2 text-xs font-mono uppercase font-bold text-slate-300 hover:text-slate-100 rounded-lg pointer-events-auto transition cursor-pointer"
         >
           Выйти из Игры
         </button>
       </div>
 
-      {/* Modern Right HUD Command Panel Construction yard, Minimap, and power bars */}
-      <div className={`absolute right-4 bottom-4 top-16 w-80 bg-slate-950/95 border border-slate-800 backdrop-blur p-4 rounded-xl flex flex-col justify-between shadow-2xl z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-x-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
+      {/* Absolute Compact Tactical Alerts in Top-Left under Budget card */}
+      <div className="absolute top-[102px] left-6 flex flex-col gap-0.5 max-w-sm pointer-events-none z-30">
+        {notifications.map(n => (
+          <div
+            key={n.id}
+            className={`text-[11px] font-mono font-bold tracking-wide transition-all duration-300 animate-slide-in drop-shadow-[0_1.5px_2px_rgba(0,0,0,1)] uppercase ${
+              n.type === 'warn'
+                ? 'text-rose-400'
+                : n.type === 'success'
+                ? 'text-emerald-400'
+                : 'text-cyan-300'
+            }`}
+          >
+            ● {n.text}
+          </div>
+        ))}
+      </div>
+
+      {/* Modern Bottom Horizontal HUD Command Panel containing minimap, tactical superweapon, and dynamic assembly yards */}
+      <div className={`absolute left-4 right-4 bottom-4 h-auto md:h-[224px] bg-slate-950/90 border border-slate-800/80 backdrop-blur p-4 rounded-xl flex flex-col md:flex-row gap-5 shadow-2xl z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-y-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
         
-        {/* Toggle Collapse handle anchored on left border of panel */}
+        {/* Toggle Collapse handle anchored on top border of panel */}
         <button
           onClick={() => setIsMenuCollapsed(!isMenuCollapsed)}
-          className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-12 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-l-md flex items-center justify-center text-slate-350 cursor-pointer shadow-lg z-30"
+          className="absolute -top-3 left-1/2 -translate-x-1/2 w-12 h-6 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-t-lg flex items-center justify-center text-slate-350 cursor-pointer shadow-lg z-30"
           title={isMenuCollapsed ? "Развернуть панель" : "Свернуть панель"}
         >
           {isMenuCollapsed ? (
-            <ChevronLeft className="w-4 h-4 text-cyan-400 animate-pulse" />
+            <ChevronUp className="w-4 h-4 text-cyan-400 animate-pulse" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-slate-400" />
+            <ChevronDown className="w-4 h-4 text-slate-400" />
           )}
         </button>
         
-        {/* Top Section: Radar Minimap with colored indicator targets */}
-        <div>
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="text-xs font-mono font-bold tracking-wider text-slate-400 uppercase flex items-center gap-1">
-              <Compass className="w-3.5 h-3.5 text-cyan-400 animate-spin" /> Тактическая Карта
+        {/* 1. Left Section: Radar Minimap with colored indicator targets */}
+        <div className="w-full md:w-44 select-none shrink-0 flex flex-col justify-between">
+          <div className="flex justify-between items-center mb-1.5">
+            <h3 className="text-[10px] font-mono font-bold tracking-wider text-slate-400 uppercase flex items-center gap-1">
+              <Compass className="w-3 h-3 text-cyan-400 animate-spin" /> ТАКТИЧЕСКИЙ РАДАР
             </h3>
-            <span className="text-[10px] font-mono text-cyan-500 font-semibold bg-cyan-950/30 px-2 py-0.5 rounded uppercase border border-cyan-800/20">РАДАР АКТИВЕН</span>
+            <span className="text-[9px] font-mono text-cyan-400 font-semibold bg-cyan-950/30 px-1.5 py-0.5 rounded border border-cyan-800/20 uppercase tracking-widest scale-90">АКТИВЕН</span>
           </div>
 
           <div
             onClick={handleMinimapClick}
-            className="w-full aspect-square bg-[#0b1016] border border-slate-800 rounded-lg relative overflow-hidden cursor-crosshair shadow-inner"
+            className="w-40 h-40 md:w-[164px] md:h-[164px] bg-[#0b1016] border border-slate-800 rounded-lg relative overflow-hidden cursor-crosshair shadow-inner mx-auto md:mx-0"
             style={{
               backgroundImage: `radial-gradient(circle at center, rgba(8, 145, 178, 0.1) 1px, transparent 1px)`,
               backgroundSize: '16px 16px'
@@ -4216,7 +4669,7 @@ export default function RTSGameCanvas({
                 key={idx}
                 className="absolute w-2 h-2 bg-yellow-500 rounded-full border border-black animate-pulse"
                 style={{
-                  left: `${(spot.x / lobby.mapSize) * 100}%`,
+                  left: `${(1 - spot.x / lobby.mapSize) * 100}%`,
                   top: `${(1 - spot.z / lobby.mapSize) * 100}%`,
                   transform: 'translate(-50%, -50%)'
                 }}
@@ -4246,7 +4699,7 @@ export default function RTSGameCanvas({
                   className={`absolute rounded-xs shadow-sm ${ent.type === 'building' ? 'w-2 h-2 scale-125 rotate-45' : 'w-1 h-1'}`}
                   style={{
                     backgroundColor: owner.color,
-                    left: `${(ent.x / lobby.mapSize) * 100}%`,
+                    left: `${(1 - ent.x / lobby.mapSize) * 100}%`,
                     top: `${(1 - ent.z / lobby.mapSize) * 100}%`,
                     transform: 'translate(-50%, -50%)'
                   }}
@@ -4260,7 +4713,7 @@ export default function RTSGameCanvas({
               style={{
                 width: `${(26 / lobby.mapSize) * 100}%`,
                 height: `${(20 / lobby.mapSize) * 100}%`,
-                left: `${(camPos.x / lobby.mapSize) * 100}%`,
+                left: `${(1 - camPos.x / lobby.mapSize) * 100}%`,
                 top: `${(1 - camPos.z / lobby.mapSize) * 100}%`,
                 transform: 'translate(-50%, -50%)',
                 boxShadow: '0 0 6px rgba(34, 211, 238, 0.25)'
@@ -4278,12 +4731,15 @@ export default function RTSGameCanvas({
           </div>
         </div>
 
-        {/* Middle Section: Command Power Charges */}
-        <div className="border-t border-slate-900 pt-3 mt-3">
-          <div className="flex justify-between items-center mb-1.5">
-            <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest">{getCommandPowerName(selfPlayer.faction)}</span>
-            <span className="text-[10px] font-mono text-cyan-400 font-semibold">{commandCharge}% ГОТОВНО</span>
+        {/* 2. Center Section: Command Power Charges */}
+        <div className="w-full md:w-64 flex flex-col justify-center border-t md:border-t-0 md:border-l md:border-r border-slate-800/80 pt-3 md:pt-0 md:px-5 shrink-0">
+          <div className="mb-2">
+            <h4 className="text-xs font-mono font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
+              ОБРАТНЫЙ ОТСЧЕТ СУПЕРОРУЖИЯ
+            </h4>
+            <span className="text-[10px] font-mono text-cyan-400 font-semibold">{getCommandPowerName(selfPlayer.faction)}</span>
           </div>
+
           <div className="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-800">
             <div
               className={`h-full transition-all duration-300 ${
@@ -4294,32 +4750,36 @@ export default function RTSGameCanvas({
               style={{ width: `${commandCharge}%` }}
             />
           </div>
+          <div className="flex justify-between items-center text-[9px] font-mono mt-1 text-slate-400">
+            <span>ЗАРЯД ЭНЕРГИИ</span>
+            <span className={commandCharge >= 100 ? "text-cyan-400 font-bold" : "text-cyan-600"}>{commandCharge}%</span>
+          </div>
           
           <button
             onClick={handleCommandStrikeSelection}
             disabled={commandCharge < 100}
-            className={`w-full mt-2.5 text-xs font-bold uppercase tracking-widest py-2 rounded-lg transition border cursor-pointer ${
+            className={`w-full mt-3 text-xs font-bold uppercase tracking-widest py-2 rounded-lg transition border cursor-pointer ${
               commandCharge >= 100
                 ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400 border-cyan-400 shadow-md shadow-cyan-900/30'
                 : 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
             }`}
           >
-            {commandCharge >= 100 ? 'АКТИВИРОВАТЬ ТАКТИЧЕСКИЙ УДАР' : 'ЗАРЯДКА СУПЕРСИСТЕМЫ'}
+            {commandCharge >= 100 ? 'ЗАКАТИТЬ АВИАУДАР' : 'СЕТЬ СУПЕРОРУЖИЯ ЗАРЯЖАЕТСЯ'}
           </button>
         </div>
 
-        {/* Bottom Section: Structure Deployers / Factories recruiters */}
-        <div className="border-t border-slate-900 pt-3 mt-3 flex-1 flex flex-col justify-end">
-          
-          <div className="space-y-4">
+        {/* 3. Right Section: Structure Deployers / Factories recruiters */}
+        <div className="flex-1 flex flex-col justify-center overflow-x-auto min-w-0">
+          <div className="w-full h-full flex flex-col justify-center">
             
             {/* Context: Builder selected */}
             {hasSelectedBuilder && (
-              <div className="animate-fade-in">
-                <div className="flex justify-between items-center mb-1.5">
-                  <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold">РАЗВЕРТЫВАНИЕ СТРОЕНИЙ (СТРОИТЕЛЬ)</h4>
+              <div className="animate-fade-in flex flex-col h-full justify-between">
+                <div className="flex justify-between items-center mb-1.5 md:mb-2">
+                  <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold">РАЗВЕРТЫВАНИЕ СТРОЕНИЙ (СТРОИТЕЛЬ ПРЯМОГО ПОДЧИНЕНИЯ)</h4>
+                  <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">ВЫБЕРИТЕ ЗДАНИЕ И СЕКТОР КЛИКОМ НА КАРТЕ</span>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                   {(['power_plant', 'supply_refinery', 'oil_derrick', 'barracks', 'war_factory', 'defense_turret'] as BuildingType[]).map(key => {
                     const prop = getFactionBuildingProperties(key, selfPlayer.faction);
                     const active = buildingToPlace === key;
@@ -4331,14 +4791,14 @@ export default function RTSGameCanvas({
                         onMouseEnter={() => setHoveredItem({ type: 'building', key })}
                         onMouseLeave={() => setHoveredItem(null)}
                         disabled={!canAfford}
-                        className={`p-2 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer border ${
+                        className={`p-2.5 rounded-lg text-center flex flex-col items-center justify-center min-h-[56px] transition cursor-pointer border ${
                           active 
-                            ? 'bg-cyan-950/20 border-cyan-400 text-cyan-300' 
+                            ? 'bg-cyan-950/20 border-cyan-400 text-cyan-350' 
                             : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-350'
-                        } disabled:opacity-40 disabled:cursor-not-allowed`}
+                        } disabled:opacity-30 disabled:cursor-not-allowed`}
                       >
-                        <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
-                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
+                        <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
                       </button>
                     );
                   })}
@@ -4348,9 +4808,12 @@ export default function RTSGameCanvas({
 
             {/* Context: Command Center selected */}
             {hasSelectedCC && (
-              <div className="animate-fade-in">
-                <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-2 font-bold uppercase text-left">ШТАБ: ПОДГОТОВКА СТРОИТЕЛЕЙ</h4>
-                <div className="grid grid-cols-2 gap-1.5">
+              <div className="animate-fade-in flex flex-col h-full justify-between">
+                <div className="mb-2">
+                  <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold text-left">ШТАБ: ПОДГОТОВКА СТРОИТЕЛЬНЫХ ДРОНОВ</h4>
+                  <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">СТРОИТЕЛИ ИГРАЮТ КЛЮЧЕВУЮ РОЛЬ В СТРОИТЕЛЬСТВЕ СЕКТОРОВ</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                   {(['builder'] as UnitType[]).map(key => {
                     const prop = getFactionUnitProperties(key, selfPlayer.faction);
                     const canAfford = credits >= prop.cost;
@@ -4361,10 +4824,10 @@ export default function RTSGameCanvas({
                         onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
                         onMouseLeave={() => setHoveredItem(null)}
                         disabled={!canAfford}
-                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-40 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer disabled:cursor-not-allowed"
+                        className="p-2.5 bg-slate-900/60 border border-slate-850 hover:border-slate-700 disabled:opacity-30 rounded-lg text-center flex flex-col items-center justify-center min-h-[56px] transition cursor-pointer disabled:cursor-not-allowed"
                       >
-                        <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
-                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
+                        <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
                       </button>
                     );
                   })}
@@ -4374,9 +4837,12 @@ export default function RTSGameCanvas({
 
             {/* Context: Barracks selected */}
             {hasSelectedBarracks && (
-              <div className="animate-fade-in">
-                <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-2 font-bold uppercase text-left">КАЗАРМЫ: ПОДГОТОВКА ВОЙСК</h4>
-                <div className="grid grid-cols-2 gap-1.5">
+              <div className="animate-fade-in flex flex-col h-full justify-between">
+                <div className="mb-2 flex justify-between items-center">
+                  <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold text-left">КАЗАРМА: МОДУЛЬНАЯ СБОРКА РОБОТОТЕХНИКИ И ОТРЯДОВ</h4>
+                  <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">ДЕСАНТ И ДРОНЫ-КАМИКАДЗЕ ДЛЯ БЫСТРЫХ СХВАТОК</span>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
                   {(['drone_scout', 'drone_kamikaze', 'cyber_specops'] as UnitType[]).map(key => {
                     const prop = getFactionUnitProperties(key, selfPlayer.faction);
                     const canAfford = credits >= prop.cost;
@@ -4387,10 +4853,10 @@ export default function RTSGameCanvas({
                         onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
                         onMouseLeave={() => setHoveredItem(null)}
                         disabled={!canAfford}
-                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-40 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer disabled:cursor-not-allowed"
+                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-30 rounded-lg text-center flex flex-col items-center justify-center min-h-[56px] transition cursor-pointer disabled:cursor-not-allowed"
                       >
-                        <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
-                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
+                        <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
                       </button>
                     );
                   })}
@@ -4400,9 +4866,12 @@ export default function RTSGameCanvas({
 
             {/* Context: War Factory selected */}
             {hasSelectedWarFactory && (
-              <div className="animate-fade-in">
-                <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-2 font-bold uppercase text-left">ВОЕННЫЙ ЗАВОД: СБОРКА ТЕХНИКИ</h4>
-                <div className="grid grid-cols-2 gap-1.5">
+              <div className="animate-fade-in flex flex-col h-full justify-between">
+                <div className="mb-2 flex justify-between items-center">
+                  <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold text-left">ВОЕННЫЙ ЗАВОД: СБОРКА ТЯЖЕЛОЙ БРОНЕТЕХНИКИ</h4>
+                  <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">ПРОИЗВОДИТЕЛЬ ТАНКОВ, РСЗО, ГАРВЕСТЕРОВ И ПОДАВИТЕЛЕЙ ПОМЕХ</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
                   {(['precision_tank', 'artillery_mlrs', 'mobile_jammer', 'harvester'] as UnitType[]).map(key => {
                     const prop = getFactionUnitProperties(key, selfPlayer.faction);
                     const canAfford = credits >= prop.cost;
@@ -4413,10 +4882,10 @@ export default function RTSGameCanvas({
                         onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
                         onMouseLeave={() => setHoveredItem(null)}
                         disabled={!canAfford}
-                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-40 rounded-lg text-center flex flex-col items-center justify-between transition cursor-pointer disabled:cursor-not-allowed"
+                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-30 rounded-lg text-center flex flex-col items-center justify-center min-h-[56px] transition cursor-pointer disabled:cursor-not-allowed"
                       >
-                        <span className="text-[10px] font-bold uppercase line-clamp-1">{prop.name}</span>
-                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-1">${prop.cost}</span>
+                        <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
                       </button>
                     );
                   })}
@@ -4472,25 +4941,92 @@ export default function RTSGameCanvas({
 
       </div>
 
-      {/* Dynamic Selection Details Card HUD (Bottom center overlayed) */}
-      {selectedEntityIds.length > 0 && (
-        <div className="absolute bottom-6 left-6 right-96 flex justify-center pointer-events-none z-20">
-          <div className="bg-slate-900/95 border border-slate-800 backdrop-blur-md p-4 rounded-xl flex items-center gap-6 max-w-xl pointer-events-auto shadow-2xl">
-            <div className="relative p-2.5 bg-cyan-950/20 border border-cyan-800/30 rounded-lg text-cyan-400">
-              <Swords className="w-8 h-8" />
+
+
+      {/* Mobile-tailored Touch Actions Dashboard (bottom floating, only shown if on mobile) */}
+      {isMobile && (
+        <div className="absolute bottom-6 left-4 right-4 md:left-auto md:right-96 flex flex-col items-center pointer-events-none z-30 animate-fade-in">
+          {/* Active Help Bar */}
+          <div className="bg-slate-950/90 text-cyan-400 border border-cyan-500/30 text-[10px] uppercase font-mono px-3 py-1 rounded-full mb-2 shadow-lg backdrop-blur shadow-black/60">
+            {buildingToPlace ? (
+              <span className="text-yellow-400 animate-pulse">● РЕЖИМ СТРОИТЕЛЬСТВА — Тапните по карте</span>
+            ) : commandStrikeActive ? (
+              <span className="text-rose-400 animate-pulse">● УДАР СУПЕРОРУЖИЕМ — Выберите координаты</span>
+            ) : selectedEntityIds.length > 0 ? (
+              <span className="text-emerald-400 font-bold">● ВЫБРАНО: {selectedEntityIds.length} ЕД. — Тап для Движения/Атаки</span>
+            ) : (
+              <span>🟢 ДВОЙНОЙ ТАП ДЛЯ ВЫБОРА • СЕНСОРНЫЙ КОНТРОЛЬ</span>
+            )}
+          </div>
+
+          {/* Action Deck */}
+          <div className="bg-slate-900/95 border border-slate-700/60 backdrop-blur-md p-2 rounded-xl flex items-center justify-between gap-3 pointer-events-auto shadow-2xl w-full max-w-sm">
+            
+            {/* Split Mode Selector (Replaced with Gesture Help Info) */}
+            <div className="text-[9.5px] font-mono text-slate-400 px-1 leading-normal">
+              <span className="text-cyan-400">Двойной тап:</span> Выбрать Юнит<br />
+              <span className="text-cyan-400">Двойной тап + задержка:</span> Рамка
             </div>
-            <div>
-              <h4 className="text-sm font-bold uppercase tracking-wider text-cyan-200">
-                ОТРЯД СФОРМИРОВАН ({selectedEntityIds.length} ЕД. ПОД КОНТРОЛЕМ)
-              </h4>
-              <p className="text-xs text-slate-400 mt-0.5 leading-relaxed font-mono">
-                Нажмите Правой Кнопкой Мыши по карте, чтобы переместить войска, или кликните по объектам врага для ведения огня!
-              </p>
-              <div className="flex gap-2 mt-2">
-                <span className="text-[9.5px] font-mono bg-cyan-950/40 border border-cyan-800/30 text-cyan-300 px-2 py-0.5 rounded-full uppercase">ЗАХВАТ ЦЕЛИ</span>
-                <span className="text-[9.5px] font-mono bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full uppercase">ГОРЯЧИЙ СТАРТ СИСТЕМ</span>
-              </div>
+
+            {/* Tactical actions */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  const sim = simulationRef.current;
+                  if (!sim) return;
+                  const combatIds = sim.entities
+                    .filter(ent => ent.playerId === playerId && ent.state !== 'dead' && ent.type === 'unit' && ent.subType !== 'builder')
+                    .map(ent => ent.id);
+                  sim.selectedIds = combatIds;
+                  setSelectedEntityIds(combatIds);
+                  sound.playSelect();
+                  pushNotification(`Выбрана боевая армия: ${combatIds.length} ед.`, 'success');
+                }}
+                className="bg-slate-950 hover:bg-slate-850 text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 px-2.5 py-2 rounded-lg text-[9.5px] font-bold uppercase font-mono tracking-wider transition cursor-pointer"
+              >
+                Войска ({simulationRef.current?.entities.filter(e => e.playerId === playerId && e.state !== 'dead' && e.type === 'unit' && e.subType !== 'builder').length || 0})
+              </button>
+
+              {selectedEntityIds.length > 0 && (
+                <button
+                  onClick={() => {
+                    const sim = simulationRef.current;
+                    if (!sim) return;
+                    sim.selectedIds = [];
+                    setSelectedEntityIds([]);
+                    sound.playSelect();
+                  }}
+                  className="bg-slate-950 hover:bg-slate-850 text-slate-400 hover:text-slate-250 border border-slate-800 px-2.5 py-2 rounded-lg text-[9.5px] font-mono uppercase transition cursor-pointer"
+                >
+                  Сбросить
+                </button>
+              )}
+
+              {/* Cancel State button (only shown if building or superweapon active) */}
+              {(buildingToPlace || commandStrikeActive) && (
+                <button
+                  onClick={() => {
+                    const sim = simulationRef.current;
+                    if (!sim) return;
+                    if (sim.buildingToPlace) {
+                      sim.buildingToPlace = null;
+                      setBuildingToPlace(null);
+                      pushNotification('Строительство отменено', 'info');
+                    }
+                    if (sim.commandStrikeActive) {
+                      sim.commandStrikeActive = false;
+                      setCommandStrikeActive(false);
+                      pushNotification('Удар отменен', 'info');
+                    }
+                    sound.playClick();
+                  }}
+                  className="bg-rose-950/70 hover:bg-rose-900 border border-rose-800 text-rose-300 px-3 py-2 rounded-lg text-[9.5px] font-bold uppercase transition animate-pulse cursor-pointer"
+                >
+                  Отмена
+                </button>
+              )}
             </div>
+
           </div>
         </div>
       )}
