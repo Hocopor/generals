@@ -1,5 +1,22 @@
 @import "tailwindcss";
 
+/* Block accidental pull-to-refresh / overscroll bounce while panning the map.
+   overscroll-behavior on the scroll container disables the browser refresh gesture,
+   inner scroll areas (lobby, chat) keep working thanks to `contain`. */
+html,
+body {
+  overscroll-behavior: none;
+  height: 100%;
+  /* Avoid iOS rubber-band on the document itself */
+  position: relative;
+}
+
+body {
+  /* Disable text/selection callouts that fire on long-press while ordering units */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
 @layer utilities {
   /* Dynamic slide-in effect for combat notifications */
   .animate-slide-in {
@@ -9,6 +26,25 @@
   /* Sweeping scanning line effect for active military radar tracking */
   .animate-radar-sweep {
     animation: radarSweep 4s linear infinite;
+  }
+
+  /* Looping "rotate your device to landscape" hint animation */
+  .animate-rotate-device {
+    animation: rotateDevice 2.4s ease-in-out infinite;
+  }
+}
+
+@keyframes rotateDevice {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  55%,
+  80% {
+    transform: rotate(-90deg);
+  }
+  100% {
+    transform: rotate(-90deg);
   }
 }
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Faction, Lobby, Player } from './types';
 import LobbyPanel from './components/LobbyPanel';
 import RTSGameCanvas from './components/RTSGameCanvas';
+import MobileShell from './components/MobileShell';
 import { sound } from './utils/audio';
 import { Shield, Swords, RefreshCw, Volume2, VolumeX, Medal, Trophy, LogOut, Radio } from 'lucide-react';
 
@@ -218,6 +219,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#070b0e] text-slate-100 flex flex-col justify-between overflow-x-hidden relative">
+      {/* Fullscreen control + mobile rotate gate */}
+      <MobileShell buttonRightClass="right-16" />
+
       {/* Sound controller */}
       <div className="absolute top-4 right-4 z-50">
         <button
