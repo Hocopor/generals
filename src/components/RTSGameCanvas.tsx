@@ -4,7 +4,7 @@ import { Faction, Lobby, Player, GameEntity, BuildingType, UnitType, GameActionE
 import { sound } from '../utils/audio';
 import { generateProceduralMap, GeneratedMap, MapNode } from '../utils/mapGenerator';
 import { getFactionUnitProperties, getFactionBuildingProperties } from '../utils/factionProperties';
-import { Shield, Zap, Sparkles, Swords, Play, Compass, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from 'lucide-react';
+import { Shield, Zap, Swords, Play, RefreshCw, AlertTriangle, ChevronRight, ChevronUp, ChevronDown, Coins, LogOut, Radar, Crosshair, Target } from 'lucide-react';
 
 interface RTSGameCanvasProps {
   lobby: Lobby;
@@ -4590,25 +4590,37 @@ export default function RTSGameCanvas({
       {/* Top HUD Controls Panel bar */}
       <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none z-20">
         {/* Cash flow index card */}
-        <div className="bg-slate-950/90 border border-slate-800/80 backdrop-blur-md p-3 px-5 rounded-lg flex items-center gap-6 pointer-events-auto shadow-lg shadow-black/40">
-          <div>
-            <p className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">БЮДЖЕТ</p>
-            <p className="text-xl font-bold font-mono text-emerald-400">⟨${credits}⟩</p>
+        <div className="ui-panel ui-railed clip-bevel-sm p-3 px-4 flex items-center gap-5 pointer-events-auto">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/12 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Coins className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[9px] text-slate-500 tracking-[0.16em] uppercase">Бюджет</p>
+              <p className="text-lg font-bold font-mono text-emerald-400 leading-tight">${credits}</p>
+            </div>
           </div>
-          <div>
-            <p className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">СТАТУС ЭНЕРГОСЕТИ</p>
-            <p className={`text-md font-bold font-mono ${powerGenerated >= powerRequired ? 'text-cyan-400' : 'text-rose-500 animate-pulse'}`}>
-              ⚡ {powerRequired} / {powerGenerated} ГВт {powerGenerated < powerRequired && 'АВАРИЯ СЕТИ'}
-            </p>
+          <div className="w-px h-8 bg-slate-700/50" />
+          <div className="flex items-center gap-2.5">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${powerGenerated >= powerRequired ? 'bg-cyan-500/12 border-cyan-500/30 text-cyan-400' : 'bg-rose-500/12 border-rose-500/40 text-rose-400'}`}>
+              <Zap className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[9px] text-slate-500 tracking-[0.16em] uppercase">Энергосеть</p>
+              <p className={`text-sm font-bold font-mono leading-tight ${powerGenerated >= powerRequired ? 'text-cyan-400' : 'text-rose-500 animate-pulse'}`}>
+                {powerRequired} / {powerGenerated} ГВт
+                {powerGenerated < powerRequired && <span className="ml-1 text-[10px]">АВАРИЯ</span>}
+              </p>
+            </div>
           </div>
         </div>
 
         {/* Quick Back arrow */}
         <button
           onClick={onExitGame}
-          className="bg-slate-950/90 hover:bg-slate-800 border border-slate-800 backdrop-blur px-4 py-2 text-xs font-mono uppercase font-bold text-slate-300 hover:text-slate-100 rounded-lg pointer-events-auto transition cursor-pointer"
+          className="ui-btn ui-btn-ghost clip-bevel-sm px-3.5 py-2.5 text-xs uppercase tracking-wide pointer-events-auto"
         >
-          Выйти из Игры
+          <LogOut className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Выйти</span>
         </button>
       </div>
 
@@ -4631,8 +4643,8 @@ export default function RTSGameCanvas({
       </div>
 
       {/* Modern Bottom Horizontal HUD Command Panel containing minimap, tactical superweapon, and dynamic assembly yards */}
-      <div className={`absolute left-4 right-4 bottom-4 h-auto md:h-[224px] bg-slate-950/90 border border-slate-800/80 backdrop-blur p-4 rounded-xl flex flex-col md:flex-row gap-5 shadow-2xl z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-y-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
-        
+      <div className={`absolute left-4 right-4 bottom-4 h-auto md:h-[224px] ui-panel ui-railed p-4 flex flex-col md:flex-row gap-5 z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-y-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
+
         {/* Toggle Collapse handle anchored on top border of panel */}
         <button
           onClick={() => setIsMenuCollapsed(!isMenuCollapsed)}
@@ -4640,19 +4652,21 @@ export default function RTSGameCanvas({
           title={isMenuCollapsed ? "Развернуть панель" : "Свернуть панель"}
         >
           {isMenuCollapsed ? (
-            <ChevronUp className="w-4 h-4 text-cyan-400 animate-pulse" />
+            <ChevronUp className="w-4 h-4 text-cyan-400" />
           ) : (
             <ChevronDown className="w-4 h-4 text-slate-400" />
           )}
         </button>
-        
+
         {/* 1. Left Section: Radar Minimap with colored indicator targets */}
         <div className="w-full md:w-44 select-none shrink-0 flex flex-col justify-between">
           <div className="flex justify-between items-center mb-1.5">
-            <h3 className="text-[10px] font-mono font-bold tracking-wider text-slate-400 uppercase flex items-center gap-1">
-              <Compass className="w-3 h-3 text-cyan-400 animate-spin" /> ТАКТИЧЕСКИЙ РАДАР
+            <h3 className="text-[10px] font-semibold tracking-[0.12em] text-slate-400 uppercase flex items-center gap-1.5">
+              <Radar className="w-3.5 h-3.5 text-cyan-400" /> Радар
             </h3>
-            <span className="text-[9px] font-mono text-cyan-400 font-semibold bg-cyan-950/30 px-1.5 py-0.5 rounded border border-cyan-800/20 uppercase tracking-widest scale-90">АКТИВЕН</span>
+            <span className="text-[9px] text-emerald-300 font-semibold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/25 uppercase tracking-wider flex items-center gap-1">
+              <span className="w-1 h-1 rounded-full bg-emerald-400" /> онлайн
+            </span>
           </div>
 
           <div
@@ -4733,11 +4747,14 @@ export default function RTSGameCanvas({
 
         {/* 2. Center Section: Command Power Charges */}
         <div className="w-full md:w-64 flex flex-col justify-center border-t md:border-t-0 md:border-l md:border-r border-slate-800/80 pt-3 md:pt-0 md:px-5 shrink-0">
-          <div className="mb-2">
-            <h4 className="text-xs font-mono font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
-              ОБРАТНЫЙ ОТСЧЕТ СУПЕРОРУЖИЯ
-            </h4>
-            <span className="text-[10px] font-mono text-cyan-400 font-semibold">{getCommandPowerName(selfPlayer.faction)}</span>
+          <div className="mb-2 flex items-center gap-2">
+            <Target className={`w-4 h-4 shrink-0 ${commandCharge >= 100 ? 'text-cyan-400' : 'text-slate-500'}`} />
+            <div className="min-w-0">
+              <h4 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide leading-none">
+                Супероружие
+              </h4>
+              <span className="text-[10px] text-cyan-400 font-semibold truncate block">{getCommandPowerName(selfPlayer.faction)}</span>
+            </div>
           </div>
 
           <div className="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-800">
@@ -4751,20 +4768,18 @@ export default function RTSGameCanvas({
             />
           </div>
           <div className="flex justify-between items-center text-[9px] font-mono mt-1 text-slate-400">
-            <span>ЗАРЯД ЭНЕРГИИ</span>
+            <span className="uppercase tracking-wide">Заряд</span>
             <span className={commandCharge >= 100 ? "text-cyan-400 font-bold" : "text-cyan-600"}>{commandCharge}%</span>
           </div>
-          
+
           <button
             onClick={handleCommandStrikeSelection}
             disabled={commandCharge < 100}
-            className={`w-full mt-3 text-xs font-bold uppercase tracking-widest py-2 rounded-lg transition border cursor-pointer ${
-              commandCharge >= 100
-                ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400 border-cyan-400 shadow-md shadow-cyan-900/30'
-                : 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+            className={`ui-btn w-full mt-3 text-xs uppercase tracking-wide py-2.5 ${
+              commandCharge >= 100 ? 'ui-btn-primary clip-bevel-sm' : 'ui-btn-ghost'
             }`}
           >
-            {commandCharge >= 100 ? 'ЗАКАТИТЬ АВИАУДАР' : 'СЕТЬ СУПЕРОРУЖИЯ ЗАРЯЖАЕТСЯ'}
+            {commandCharge >= 100 ? <><Crosshair className="w-3.5 h-3.5" /> Нанести удар</> : 'Идёт зарядка...'}
           </button>
         </div>
 
@@ -4791,11 +4806,7 @@ export default function RTSGameCanvas({
                         onMouseEnter={() => setHoveredItem({ type: 'building', key })}
                         onMouseLeave={() => setHoveredItem(null)}
                         disabled={!canAfford}
-                        className={`p-2.5 rounded-lg text-center flex flex-col items-center justify-center min-h-[56px] transition cursor-pointer border ${
-                          active 
-                            ? 'bg-cyan-950/20 border-cyan-400 text-cyan-350' 
-                            : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-350'
-                        } disabled:opacity-30 disabled:cursor-not-allowed`}
+                        className={`prod-btn ${active ? 'is-active' : ''}`}
                       >
                         <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
                         <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
@@ -4824,7 +4835,7 @@ export default function RTSGameCanvas({
                         onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
                         onMouseLeave={() => setHoveredItem(null)}
                         disabled={!canAfford}
-                        className="p-2.5 bg-slate-900/60 border border-slate-850 hover:border-slate-700 disabled:opacity-30 rounded-lg text-center flex flex-col items-center justify-center min-h-[56px] transition cursor-pointer disabled:cursor-not-allowed"
+                        className="prod-btn"
                       >
                         <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
                         <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
@@ -4853,7 +4864,7 @@ export default function RTSGameCanvas({
                         onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
                         onMouseLeave={() => setHoveredItem(null)}
                         disabled={!canAfford}
-                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-30 rounded-lg text-center flex flex-col items-center justify-center min-h-[56px] transition cursor-pointer disabled:cursor-not-allowed"
+                        className="prod-btn"
                       >
                         <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
                         <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
@@ -4882,7 +4893,7 @@ export default function RTSGameCanvas({
                         onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
                         onMouseLeave={() => setHoveredItem(null)}
                         disabled={!canAfford}
-                        className="p-2.5 bg-slate-900/60 border border-slate-800 hover:border-slate-700 disabled:opacity-30 rounded-lg text-center flex flex-col items-center justify-center min-h-[56px] transition cursor-pointer disabled:cursor-not-allowed"
+                        className="prod-btn"
                       >
                         <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
                         <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
@@ -4960,7 +4971,7 @@ export default function RTSGameCanvas({
           </div>
 
           {/* Action Deck */}
-          <div className="bg-slate-900/95 border border-slate-700/60 backdrop-blur-md p-2 rounded-xl flex items-center justify-between gap-3 pointer-events-auto shadow-2xl w-full max-w-sm">
+          <div className="ui-panel p-2 flex items-center justify-between gap-3 pointer-events-auto w-full max-w-sm">
             
             {/* Split Mode Selector (Replaced with Gesture Help Info) */}
             <div className="text-[9.5px] font-mono text-slate-400 px-1 leading-normal">

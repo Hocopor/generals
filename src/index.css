@@ -71,6 +71,278 @@ body {
   }
 }
 
+/* ============================================================
+   TACTICAL DESIGN SYSTEM
+   One accent (cyan), one radius scale, real materiality.
+   Signature move: beveled "cut" corners instead of plain
+   rectangles, giving the military-HUD feel without going round.
+   ============================================================ */
+:root {
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --bevel: 13px;
+
+  --accent: 34 211 238;        /* cyan-400  */
+  --accent-deep: 8 145 178;    /* cyan-600  */
+  --surface: 12 18 26;         /* panel base */
+  --hairline: 148 163 184;     /* slate-400 for low-alpha borders */
+}
+
+/* --- Beveled corner clip (the tactical "cut") --- */
+.clip-bevel {
+  clip-path: polygon(
+    var(--bevel) 0, 100% 0, 100% calc(100% - var(--bevel)),
+    calc(100% - var(--bevel)) 100%, 0 100%, 0 var(--bevel)
+  );
+}
+.clip-bevel-sm {
+  --bevel: 8px;
+  clip-path: polygon(
+    var(--bevel) 0, 100% 0, 100% calc(100% - var(--bevel)),
+    calc(100% - var(--bevel)) 100%, 0 100%, 0 var(--bevel)
+  );
+}
+
+/* Beveled bordered frame: accent-tinted outer + inset dark inner
+   gives a crisp 1px edge that follows the cut corner. */
+.bevel-frame {
+  position: relative;
+  background: linear-gradient(180deg, rgb(var(--accent) / 0.35), rgb(var(--hairline) / 0.18));
+  padding: 1px;
+}
+.bevel-frame,
+.bevel-frame > .bevel-inner {
+  clip-path: polygon(
+    var(--bevel) 0, 100% 0, 100% calc(100% - var(--bevel)),
+    calc(100% - var(--bevel)) 100%, 0 100%, 0 var(--bevel)
+  );
+}
+.bevel-frame > .bevel-inner {
+  position: relative;
+  background: rgb(var(--surface) / 0.92);
+}
+
+/* --- Glass panels --- */
+.ui-panel {
+  background: rgb(15 23 42 / 0.72);
+  border: 1px solid rgb(var(--hairline) / 0.16);
+  border-radius: var(--r-md);
+  backdrop-filter: blur(12px);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    0 18px 40px -18px rgb(0 0 0 / 0.8);
+}
+.ui-panel-tight {
+  border-radius: var(--r-sm);
+}
+
+/* Thin accent rail along a panel's top edge: reads as "powered/online" */
+.ui-railed {
+  position: relative;
+}
+.ui-railed::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(90deg, transparent, rgb(var(--accent) / 0.7), transparent);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+/* --- Corner brackets (drawn via the element's own pseudo corners) --- */
+.ui-brackets::before,
+.ui-brackets::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgb(var(--accent) / 0.55);
+  pointer-events: none;
+}
+.ui-brackets::before { top: 7px; left: 7px; border-right: 0; border-bottom: 0; }
+.ui-brackets::after { bottom: 7px; right: 7px; border-left: 0; border-top: 0; }
+
+/* --- Buttons --- */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: var(--r-sm);
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
+  cursor: pointer;
+  user-select: none;
+}
+.ui-btn:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
+.ui-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+
+.ui-btn-primary {
+  position: relative;
+  overflow: hidden;
+  color: #04121a;
+  background: linear-gradient(180deg, rgb(56 220 245), rgb(13 160 190));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    0 8px 22px -8px rgb(var(--accent) / 0.65);
+}
+.ui-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgb(95 230 250), rgb(20 180 210));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    0 10px 26px -8px rgb(var(--accent) / 0.8);
+}
+/* moving sheen on primary */
+.ui-btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.28) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 0.6s ease;
+}
+.ui-btn-primary:hover:not(:disabled)::after { transform: translateX(120%); }
+.ui-btn-primary:disabled {
+  background: rgb(30 41 59); color: rgb(100 116 139);
+  box-shadow: none;
+}
+
+.ui-btn-ghost {
+  color: rgb(148 163 184);
+  background: rgb(15 23 42 / 0.6);
+  border: 1px solid rgb(var(--hairline) / 0.18);
+}
+.ui-btn-ghost:hover:not(:disabled) {
+  color: rgb(226 232 240);
+  border-color: rgb(var(--accent) / 0.5);
+  background: rgb(15 23 42 / 0.85);
+}
+
+.ui-btn-danger {
+  color: rgb(253 164 175);
+  background: rgb(76 5 25 / 0.45);
+  border: 1px solid rgb(244 63 94 / 0.45);
+}
+.ui-btn-danger:hover:not(:disabled) {
+  background: rgb(120 12 35 / 0.6);
+  color: rgb(255 228 232);
+}
+
+/* --- Form controls --- */
+.ui-field {
+  background: rgb(2 6 12 / 0.8);
+  border: 1px solid rgb(var(--hairline) / 0.18);
+  border-radius: var(--r-sm);
+  color: rgb(186 230 253);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.ui-field::placeholder { color: rgb(100 116 139); }
+.ui-field:focus {
+  outline: none;
+  border-color: rgb(var(--accent) / 0.7);
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.12);
+}
+.ui-select {
+  background: rgb(2 6 12 / 0.85);
+  border: 1px solid rgb(var(--hairline) / 0.18);
+  border-radius: var(--r-sm);
+  color: rgb(203 213 225);
+  cursor: pointer;
+  transition: border-color 0.2s;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 0.85rem;
+  padding-right: 1.8rem !important;
+}
+.ui-select:focus { outline: none; border-color: rgb(var(--accent) / 0.7); }
+
+/* --- Production / build tile buttons (in-game HUD) --- */
+.prod-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: 0.5rem;
+  border-radius: var(--r-sm);
+  border: 1px solid rgb(var(--hairline) / 0.16);
+  background: rgb(15 23 42 / 0.55);
+  color: rgb(203 213 225);
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+.prod-btn:hover:not(:disabled) {
+  border-color: rgb(var(--accent) / 0.5);
+  background: rgb(15 23 42 / 0.9);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px -10px rgb(var(--accent) / 0.6);
+}
+.prod-btn:active:not(:disabled) { transform: translateY(0) scale(0.96); }
+.prod-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+.prod-btn.is-active {
+  border-color: rgb(var(--accent) / 0.9);
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(165 243 252);
+  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.35);
+}
+
+/* --- Chips / badges --- */
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid rgb(var(--hairline) / 0.2);
+  color: rgb(148 163 184);
+}
+
+/* --- Motion utilities --- */
+@layer utilities {
+  .animate-fade-in { animation: fadeIn 0.3s ease forwards; }
+  .animate-fade-up { animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .animate-scale-in { animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Honor reduced-motion for all decorative animation */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-scale-in,
+  .animate-slide-in,
+  .animate-radar-sweep,
+  .ui-btn-primary::after {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
 /* Custom cursor hover colors for tactical elements */
 .cursor-crosshair {
   cursor: crosshair !important;

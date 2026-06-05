@@ -298,13 +298,13 @@ export default function App() {
                 <>
                   <button
                     onClick={handleReturnToLobby}
-                    className="w-full bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-[#070b0e] font-black uppercase tracking-widest py-3 px-6 rounded shadow transition cursor-pointer"
+                    className="ui-btn ui-btn-primary clip-bevel-sm w-full uppercase tracking-widest py-3 px-6"
                   >
                     Вернуться в Лобби
                   </button>
                   <button
                     onClick={handleLeaveLobby}
-                    className="w-full text-slate-400 hover:text-slate-100 hover:border-slate-500 border border-slate-800 text-xs font-mono uppercase tracking-widest py-2 px-6 rounded transition cursor-pointer"
+                    className="ui-btn ui-btn-ghost w-full text-xs uppercase tracking-widest py-2 px-6"
                   >
                     Покинуть Лобби и Выйти
                   </button>
@@ -312,7 +312,7 @@ export default function App() {
               ) : (
                 <button
                   onClick={handleLeaveLobby}
-                  className="w-full bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-slate-950 font-bold uppercase tracking-widest py-3 px-6 rounded shadow transition cursor-pointer"
+                  className="ui-btn ui-btn-primary clip-bevel-sm w-full uppercase tracking-widest py-3 px-6"
                 >
                   Вернуться в Штаб
                 </button>
