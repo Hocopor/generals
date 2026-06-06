@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Faction, Lobby, LobbyStatus, Player } from '../types';
 import { sound } from '../utils/audio';
+import { useIsMobile } from '../utils/useIsMobile';
 import {
   Shield, Users, Radio, Copy, Check, MessageSquare, Swords, Bot, Zap, Globe,
   Radar, Crosshair, Flame, Wind, Crown, Send, ChevronRight, Cpu, Wifi
@@ -116,6 +117,7 @@ export default function LobbyPanel({
   // UI state
   const [chatText, setChatText] = useState('');
   const [isCopied, setIsCopied] = useState(false);
+  const isMobile = useIsMobile();
 
   const uniqueTeams = lobby ? new Set(lobby.players.map(p => p.team)) : new Set();
   const allOnSameTeam = lobby ? (lobby.players.length > 1 && uniqueTeams.size <= 1) : false;
@@ -223,6 +225,275 @@ export default function LobbyPanel({
   }, []);
 
   const selfPlayer = lobby?.players.find(p => p.id === playerId);
+
+  // ============================================================
+  //  MOBILE LAYOUT — a dedicated phone/narrow-screen experience that fits
+  //  inside the viewport (no page scrolling). Not a shrunk desktop copy.
+  // ============================================================
+  if (isMobile) {
+    return (
+      <div className="h-[100dvh] w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden relative font-sans select-none" id="lobby_viewport">
+        <BackgroundBattle />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cyan-950/15 via-slate-950/55 to-slate-950 pointer-events-none z-1" />
+
+        <div className="relative z-10 flex flex-col h-full px-3 pb-3 pt-2 gap-2">
+          {/* Header: brand + general name */}
+          <div className="flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/25">
+                <Swords className="w-5 h-5 text-cyan-400" />
+              </div>
+              <div className="leading-none">
+                <h1 className="text-sm font-black tracking-wide text-[#e8f4ff]">GENERALS</h1>
+                <p className="text-[9px] text-slate-500 font-mono tracking-wider mt-0.5">Современный конфликт</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Crown className="w-3.5 h-3.5 text-amber-400" />
+              <input
+                type="text"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value.slice(0, 16))}
+                disabled={!!lobby}
+                className="ui-field px-2 py-1 text-xs font-mono w-28 disabled:opacity-60"
+                placeholder="Имя"
+              />
+            </div>
+          </div>
+
+          {lobby ? (
+            /* ---------------- ACTIVE LOBBY (mobile) ---------------- */
+            <div className="flex flex-col flex-1 min-h-0 gap-2">
+              <div className="flex items-center justify-between shrink-0">
+                <h2 className="text-sm font-bold flex items-center gap-1.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+                  </span>
+                  Лобби <span className="text-cyan-400 font-mono">{lobby.id}</span>
+                </h2>
+                {lobby.isCustom && (
+                  <button onClick={handleCopyLink} className="ui-btn ui-btn-ghost text-[10px] font-mono py-1 px-2">
+                    {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    {isCopied ? 'Готово' : 'Ссылка'}
+                  </button>
+                )}
+              </div>
+
+              {allOnSameTeam && (
+                <div className="bg-rose-950/40 border border-rose-800/60 p-2 rounded-lg text-[10px] text-rose-200 shrink-0">
+                  <strong className="text-rose-100">Запуск заблокирован.</strong> Все в одной команде — смените номера.
+                </div>
+              )}
+
+              {/* Players */}
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
+                {lobby.players.map((plr) => {
+                  const isSelf = plr.id === playerId;
+                  const FacIcon = FACTIONS.find(f => f.value === plr.faction)?.icon || Shield;
+                  return (
+                    <div key={plr.id} className={`relative overflow-hidden p-2 pl-3 rounded-lg border flex items-center justify-between gap-2 ${isSelf ? 'bg-cyan-950/15 border-cyan-700/50' : 'bg-slate-950/40 border-slate-800/80'}`}>
+                      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: plr.color }} />
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border" style={{ backgroundColor: `${plr.color}1f`, borderColor: `${plr.color}55`, color: plr.color }}>
+                          <FacIcon className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-xs text-slate-100 truncate">{plr.name}</span>
+                            {plr.isHost && <Crown className="w-3 h-3 text-amber-400 shrink-0" />}
+                            {isSelf && <span className="text-[8px] text-cyan-300 border border-cyan-500/40 rounded px-1 shrink-0">ВЫ</span>}
+                          </div>
+                          <span className="text-[10px] text-slate-400 truncate block">{FACTION_LABEL[plr.faction]}</span>
+                        </div>
+                      </div>
+                      {isSelf ? (
+                        <select value={selectedTeam} onChange={(e) => c_updatePlayerTeam(parseInt(e.target.value))} className="ui-select text-[10px] font-mono py-1 px-1.5 shrink-0">
+                          {[1, 2, 3, 4, 5].map(t => <option key={t} value={t}>Ком.{t}</option>)}
+                        </select>
+                      ) : (
+                        <span className={`text-[10px] font-semibold px-2 py-1 rounded shrink-0 ${plr.isReady ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/40' : 'text-slate-400 bg-slate-800/40 border border-slate-700/50'}`}>
+                          {plr.isReady ? 'Готов' : `Ком.${plr.team}`}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Faction quick-switch */}
+              <div className="grid grid-cols-4 gap-1.5 shrink-0">
+                {FACTIONS.map((fac) => {
+                  const active = selectedFaction === fac.value;
+                  const FacIcon = fac.icon;
+                  return (
+                    <button key={fac.value} onClick={() => c_updatePlayerFaction(fac.value)} className="ui-btn flex flex-col items-center gap-0.5 py-1.5 rounded-lg border text-[9px]"
+                      style={active
+                        ? { background: `rgb(${fac.rgb} / 0.14)`, borderColor: `rgb(${fac.rgb} / 0.7)`, color: fac.hex }
+                        : { background: 'rgb(15 23 42 / 0.5)', borderColor: 'rgb(148 163 184 / 0.15)', color: 'rgb(148 163 184)' }}>
+                      <FacIcon className="w-3.5 h-3.5" />
+                      <span className="font-semibold truncate w-full text-center">{fac.short}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-2 shrink-0">
+                <button onClick={onLeaveLobby} className="ui-btn ui-btn-ghost text-[11px] uppercase tracking-wide py-2.5 px-4">Выйти</button>
+                {lobby.isCustom && selfPlayer?.isHost ? (
+                  <button
+                    onClick={() => { sound.playLaunch(); onStartMultiplayerGame(); }}
+                    disabled={lobby.players.length < 1 || allOnSameTeam}
+                    className="ui-btn ui-btn-primary clip-bevel-sm flex-1 uppercase tracking-widest py-2.5"
+                  >
+                    <Swords className="w-4 h-4" /> Старт
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { onUpdatePlayer(selectedFaction, selectedTeam, !selfPlayer?.isReady); sound.playClick(); }}
+                    disabled={allOnSameTeam && !selfPlayer?.isReady}
+                    className={`flex-1 ui-btn uppercase tracking-widest py-2.5 ${selfPlayer?.isReady ? 'ui-btn-ghost' : 'ui-btn-primary clip-bevel-sm'}`}
+                  >
+                    {selfPlayer?.isReady ? 'Отменить' : 'Готов'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ---------------- SETUP (mobile) ---------------- */
+            <>
+              {/* Mode tabs */}
+              <div className="flex bg-slate-950/70 border border-slate-800/80 p-1 rounded-xl shrink-0">
+                <button
+                  onClick={() => { setActiveTab('single'); sound.playClick(); }}
+                  className={`ui-btn flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs uppercase tracking-wide ${activeTab === 'single' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'}`}
+                >
+                  <Bot className="w-3.5 h-3.5" /> Одиночная
+                </button>
+                <button
+                  onClick={() => { setActiveTab('multi'); sound.playClick(); }}
+                  className={`ui-btn flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs uppercase tracking-wide ${activeTab === 'multi' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'}`}
+                >
+                  <Globe className="w-3.5 h-3.5" /> Мультиплеер
+                </button>
+              </div>
+
+              {activeTab === 'single' ? (
+                <div className="flex flex-col flex-1 min-h-0 gap-2">
+                  {/* Faction picker 2x2 */}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500 font-semibold mb-1.5">Фракция командования</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {FACTIONS.map((fac) => {
+                        const isSelected = selectedFaction === fac.value;
+                        const FacIcon = fac.icon;
+                        return (
+                          <button
+                            key={fac.value}
+                            onClick={() => c_updatePlayerFaction(fac.value)}
+                            className="text-left p-2.5 rounded-xl border transition relative overflow-hidden"
+                            style={isSelected
+                              ? { background: `rgb(${fac.rgb} / 0.12)`, borderColor: `rgb(${fac.rgb} / 0.75)` }
+                              : { background: 'rgb(2 6 12 / 0.45)', borderColor: 'rgb(148 163 184 / 0.14)' }}
+                          >
+                            <span className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: fac.hex, opacity: isSelected ? 1 : 0.3 }} />
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center border shrink-0" style={{ background: `rgb(${fac.rgb} / 0.15)`, borderColor: `rgb(${fac.rgb} / 0.4)`, color: fac.hex }}>
+                                <FacIcon className="w-4 h-4" />
+                              </div>
+                              <h3 className="font-black text-[11px] tracking-wide truncate" style={{ color: isSelected ? fac.hex : 'rgb(226 232 240)' }}>{fac.short}</h3>
+                            </div>
+                            <p className="text-[9px] text-slate-400 leading-snug mt-1 line-clamp-2">{fac.desc}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Team + enemy count */}
+                  <div className="ui-panel ui-panel-tight p-2.5 space-y-2 shrink-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Команда</span>
+                      <select value={selectedTeam} onChange={(e) => c_updatePlayerTeam(parseInt(e.target.value))} className="ui-select text-[11px] font-mono py-1 px-2 text-cyan-300">
+                        {[1, 2, 3, 4, 5].map(t => <option key={t} value={t}>Команда {t}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-300 font-semibold uppercase tracking-wide flex justify-between">
+                        <span>Количество врагов</span>
+                        <span className="text-cyan-400 font-bold font-mono">{aiCount} / 5</span>
+                      </label>
+                      <input type="range" min="1" max="5" value={aiCount} onChange={(e) => { setAiCount(parseInt(e.target.value)); sound.playClick(); }} className="w-full accent-cyan-400 bg-slate-900 h-1.5 rounded cursor-pointer" />
+                    </div>
+                  </div>
+
+                  {/* AI opponents */}
+                  <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-0.5">
+                    <p className="text-[9px] text-slate-500 uppercase tracking-[0.14em] font-semibold sticky top-0 bg-slate-950/80 backdrop-blur py-0.5">Оппоненты ИИ</p>
+                    {aiSetups.map((ai, index) => {
+                      const FacIcon = FACTIONS.find(f => f.value === ai.faction)?.icon || Bot;
+                      const facHex = FACTIONS.find(f => f.value === ai.faction)?.hex || '#94a3b8';
+                      return (
+                        <div key={ai.id} className="p-2 bg-slate-950/50 border border-slate-800/80 rounded-lg flex gap-2 justify-between items-center text-xs">
+                          <span className="font-semibold text-slate-300 font-mono text-[10px] flex items-center gap-1.5 min-w-0">
+                            <FacIcon className="w-3.5 h-3.5 shrink-0" style={{ color: facHex }} />
+                            <span className="truncate">{ai.name.replace('General', 'Ген.')}</span>
+                          </span>
+                          <div className="flex gap-1.5 shrink-0">
+                            <select value={ai.faction} onChange={(e) => updateAiFaction(index, e.target.value as Faction)} className="ui-select text-[10px] font-mono py-1 px-1.5">
+                              {FACTIONS.map(f => <option key={f.value} value={f.value}>{f.short}</option>)}
+                            </select>
+                            <select value={ai.team} onChange={(e) => updateAiTeam(index, parseInt(e.target.value))} className="ui-select text-[10px] font-mono py-1 px-1.5">
+                              {[1, 2, 3, 4, 5].map(t => <option key={t} value={t}>Ком.{t}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {isSingleplayerAllSameTeam && (
+                    <div className="bg-rose-950/40 border border-rose-800/60 p-2 rounded-lg text-[10px] text-rose-200 shrink-0">
+                      <strong className="text-rose-100">Запуск заблокирован.</strong> Вы и боты в одной команде.
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleLaunchSingleplayer}
+                    disabled={isSingleplayerAllSameTeam}
+                    className="ui-btn ui-btn-primary clip-bevel w-full uppercase tracking-widest py-3 shrink-0"
+                  >
+                    <Swords className="w-4 h-4" /> В бой
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col flex-1 min-h-0 gap-2.5 justify-center">
+                  <div className="ui-panel ui-panel-tight p-3 space-y-2">
+                    <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" /> Быстрый подбор</h3>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Подключайтесь к другим генералам. Таймер запуска активируется при 2+ игроках.</p>
+                    <button onClick={() => { sound.playLaunch(); onJoinMatchmaking(playerName, selectedFaction, selectedTeam); }} className="ui-btn ui-btn-ghost w-full text-[11px] uppercase tracking-wide py-2.5 border-cyan-700/50 text-cyan-300">
+                      Найти игру · {matchmakingQueueCount} в очереди
+                    </button>
+                  </div>
+                  <div className="ui-panel ui-panel-tight p-3 space-y-2">
+                    <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2"><Users className="w-4 h-4 text-cyan-400" /> Игра с друзьями</h3>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Создайте комнату и получите ссылку-приглашение для друзей.</p>
+                    <button onClick={handleCreateCustom} className="ui-btn ui-btn-primary clip-bevel-sm w-full text-[11px] uppercase tracking-wide py-2.5">
+                      <ChevronRight className="w-4 h-4" /> Создать комнату
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-slate-500 leading-relaxed flex items-center gap-1.5 px-1">
+                    <Cpu className="w-3 h-3 text-slate-600 shrink-0" /> Связь по WebSocket. Задайте имя генерала вверху перед запуском.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 md:p-8 font-sans selection:bg-cyan-500/30 selection:text-white relative overflow-hidden" id="lobby_viewport">

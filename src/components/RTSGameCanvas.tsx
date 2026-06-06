@@ -4,6 +4,7 @@ import { Faction, Lobby, Player, GameEntity, BuildingType, UnitType, GameActionE
 import { sound } from '../utils/audio';
 import { generateProceduralMap, GeneratedMap, MapNode } from '../utils/mapGenerator';
 import { getFactionUnitProperties, getFactionBuildingProperties, getUnitShortName, getBuildingShortName } from '../utils/factionProperties';
+import { useIsMobile } from '../utils/useIsMobile';
 import { Shield, Zap, Swords, Play, RefreshCw, AlertTriangle, ChevronRight, ChevronUp, ChevronDown, Coins, LogOut, Radar, Crosshair, Target } from 'lucide-react';
 
 interface RTSGameCanvasProps {
@@ -105,7 +106,7 @@ export default function RTSGameCanvas({
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: 'info' | 'warn' | 'success' }[]>([]);
 
   // Mobile adaptation states
-  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const isMobile = useIsMobile();
   const [mobileMode, setMobileMode] = useState<'select' | 'order'>('select');
   const mobileModeRef = useRef<'select' | 'order'>('select');
 
@@ -113,21 +114,22 @@ export default function RTSGameCanvas({
     mobileModeRef.current = mobileMode;
   }, [mobileMode]);
 
+  // On touch / narrow devices the command dock starts collapsed (only the
+  // floating arrow is shown) so the battlefield map gets the full screen.
   useEffect(() => {
-    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-    const isSmall = window.innerWidth <= 1024;
-    const mobileDetected = isTouch || isSmall;
-    setIsMobile(mobileDetected);
-    if (mobileDetected) {
-      setIsMenuCollapsed(true);
-    }
-  }, []);
+    if (isMobile) setIsMenuCollapsed(true);
+  }, [isMobile]);
 
   // Viewport mapping and collapsible state HUD options
   const [camPos, setCamPos] = useState({ x: 30, z: 30, zoom: 30 });
   const [isMenuCollapsed, setIsMenuCollapsed] = useState<boolean>(false);
   const [hoveredItem, setHoveredItem] = useState<{ type: 'unit' | 'building'; key: string } | null>(null);
   const [tooltipVisible, setTooltipVisible] = useState<boolean>(false);
+  // Screen position the floating info card follows: the cursor on desktop,
+  // the finger on a long-press on mobile.
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef<boolean>(false);
 
   // Lets the minimap (rendered in JSX) query the fog-of-war grid that lives
   // inside the Three.js effect closure, so the radar respects vision too.
@@ -202,6 +204,63 @@ export default function RTSGameCanvas({
     return () => clearTimeout(timer);
   }, [hoveredItem]);
 
+  // Dismiss the floating info card and cancel any pending long-press.
+  const clearTooltip = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    setHoveredItem(null);
+  };
+
+  // Wires a production button to the floating info card. On desktop the card
+  // appears on hover and tracks the cursor; on touch it appears after a ~300ms
+  // long-press next to the finger (a short tap still builds the item).
+  const bindTooltip = (type: 'unit' | 'building', key: string) => ({
+    onMouseEnter: (e: React.MouseEvent) => {
+      setTooltipPos({ x: e.clientX, y: e.clientY });
+      setHoveredItem({ type, key });
+    },
+    onMouseMove: (e: React.MouseEvent) => {
+      setTooltipPos({ x: e.clientX, y: e.clientY });
+    },
+    onMouseLeave: clearTooltip,
+    onTouchStart: (e: React.TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      const x = t.clientX;
+      const y = t.clientY;
+      longPressFiredRef.current = false;
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = setTimeout(() => {
+        longPressFiredRef.current = true;
+        setTooltipPos({ x, y });
+        setHoveredItem({ type, key });
+        setTooltipVisible(true);
+        sound.playClick();
+      }, 300);
+    },
+    onTouchMove: () => {
+      // Finger slid away → treat as scroll, cancel the pending long-press.
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    },
+    onTouchEnd: (e: React.TouchEvent) => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      // If the long-press fired we showed info — suppress the follow-up click
+      // so reading a tooltip never accidentally builds/spends.
+      if (longPressFiredRef.current) {
+        e.preventDefault();
+        clearTooltip();
+      }
+    },
+  });
+
   // Setup initial player lists (human + dynamic computer AI profiles)
   useEffect(() => {
     const sim = simulationRef.current;
@@ -238,6 +297,10 @@ export default function RTSGameCanvas({
       sim.camX = lobby.mapSize / 2;
       sim.camZ = lobby.mapSize / 2;
     }
+
+    // Pull the camera in closer on phones so units are big enough to read and
+    // tap. Desktop keeps the wider tactical overview.
+    sim.camZoom = isMobile ? 15 : 22;
 
     // Spawn starting structures: Command Center for each alive participator!
     const startingEntities: GameEntity[] = [];
@@ -4793,6 +4856,245 @@ export default function RTSGameCanvas({
   const hasSelectedWarFactory = selectedEntities.some(ent => ent.type === 'building' && ent.subType === 'war_factory');
   const isContextActive = hasSelectedBuilder || hasSelectedCC || hasSelectedBarracks || hasSelectedWarFactory;
 
+  // ---- Shared HUD pieces (reused by the desktop panel and the mobile dock) ----
+  // Radar minimap box. Only the outer size differs between layouts, so the
+  // dots / camera frame / sweep live here once.
+  const renderMinimapBox = (boxClass: string) => (
+    <div
+      onClick={handleMinimapClick}
+      className={boxClass}
+      style={{
+        backgroundImage: `radial-gradient(circle at center, rgba(8, 145, 178, 0.1) 1px, transparent 1px)`,
+        backgroundSize: '16px 16px'
+      }}
+    >
+      {/* Symmetrical Starting bases overlayed on mini viewport (only once explored) */}
+      {simulationRef.current.map?.resourceSpots
+        .filter(spot => !fogQueryRef.current || fogQueryRef.current.explored(spot.x, spot.z))
+        .map((spot, idx) => (
+        <div
+          key={idx}
+          className="absolute w-2 h-2 bg-yellow-500 rounded-full border border-black animate-pulse"
+          style={{
+            left: `${(1 - spot.x / lobby.mapSize) * 100}%`,
+            top: `${(1 - spot.z / lobby.mapSize) * 100}%`,
+            transform: 'translate(-50%, -50%)'
+          }}
+        />
+      ))}
+
+      {/* Active player HQ hubs dots representing base zones */}
+      {simulationRef.current.entities.map(ent => {
+        if (ent.state === 'dead') return null;
+
+        const owner = simulationRef.current.players.find(p => p.id === ent.playerId) || selfPlayer;
+        const isFriendly = ent.playerId === playerId;
+
+        // Hide enemy units that are cloaked under a Mobile Jammer
+        const isTargetCloaked = ent.type === 'unit' && ent.subType !== 'mobile_jammer' && simulationRef.current.entities.some(j =>
+          j.state !== 'dead' &&
+          j.subType === 'mobile_jammer' &&
+          j.playerId === ent.playerId &&
+          Math.sqrt((j.x - ent.x)*(j.x - ent.x) + (j.z - ent.z)*(j.z - ent.z)) < 8.0
+        );
+
+        if (isTargetCloaked && !isFriendly) return null;
+
+        // Fog of war on the radar: enemies/neutrals only show where we
+        // currently have vision (own forces are always tracked).
+        const isOwnTeam = ent.team === selfPlayer.team;
+        if (!isOwnTeam && fogQueryRef.current && !fogQueryRef.current.visible(ent.x, ent.z)) return null;
+
+        return (
+          <div
+            key={ent.id}
+            className={`absolute rounded-xs shadow-sm ${ent.type === 'building' ? 'w-2 h-2 scale-125 rotate-45' : 'w-1 h-1'}`}
+            style={{
+              backgroundColor: owner.color,
+              left: `${(1 - ent.x / lobby.mapSize) * 100}%`,
+              top: `${(1 - ent.z / lobby.mapSize) * 100}%`,
+              transform: 'translate(-50%, -50%)'
+            }}
+          />
+        );
+      })}
+
+      {/* Real-time Player Viewport Camera Frame indicator */}
+      <div
+        className="absolute border border-dashed border-cyan-400/80 pointer-events-none rounded-xs bg-cyan-500/5 transition-all duration-75"
+        style={{
+          width: `${(26 / lobby.mapSize) * 100}%`,
+          height: `${(20 / lobby.mapSize) * 100}%`,
+          left: `${(1 - camPos.x / lobby.mapSize) * 100}%`,
+          top: `${(1 - camPos.z / lobby.mapSize) * 100}%`,
+          transform: 'translate(-50%, -50%)',
+          boxShadow: '0 0 6px rgba(34, 211, 238, 0.25)'
+        }}
+      >
+        <div className="absolute top-0 left-0 w-1 h-1 border-t border-l border-cyan-400" />
+        <div className="absolute top-0 right-0 w-1 h-1 border-t border-r border-cyan-400" />
+        <div className="absolute bottom-0 left-0 w-1 h-1 border-b border-l border-cyan-400" />
+        <div className="absolute bottom-0 right-0 w-1 h-1 border-b border-r border-cyan-400" />
+      </div>
+
+      {/* Scanning radar sweep visually layered */}
+      <div className="absolute inset-0 bg-gradient-to-t from-cyan-500/0 via-cyan-500/5 to-cyan-500/0 animate-radar-sweep pointer-events-none" />
+    </div>
+  );
+
+  // Context-aware production grid (builder → buildings, CC → builders,
+  // barracks / war factory → units). `compact` tightens labels for the mobile dock.
+  const renderProductionContent = (compact: boolean) => (
+    <>
+      {hasSelectedBuilder && (
+        <div className="animate-fade-in flex flex-col h-full justify-between">
+          {!compact && (
+            <div className="flex justify-between items-center mb-1.5 md:mb-2">
+              <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold">РАЗВЕРТЫВАНИЕ СТРОЕНИЙ (СТРОИТЕЛЬ ПРЯМОГО ПОДЧИНЕНИЯ)</h4>
+              <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">ВЫБЕРИТЕ ЗДАНИЕ И СЕКТОР КЛИКОМ НА КАРТЕ</span>
+            </div>
+          )}
+          {compact && <h4 className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-1">Строитель · постройки</h4>}
+          <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6'}`}>
+            {(['power_plant', 'supply_refinery', 'oil_derrick', 'barracks', 'war_factory', 'defense_turret'] as BuildingType[]).map(key => {
+              const prop = getFactionBuildingProperties(key, selfPlayer.faction);
+              const active = buildingToPlace === key;
+              const canAfford = credits >= prop.cost;
+              return (
+                <button
+                  key={key}
+                  onClick={() => activeConstructionMode(key)}
+                  {...bindTooltip('building', key)}
+                  disabled={!canAfford}
+                  className={`prod-btn ${active ? 'is-active' : ''}`}
+                >
+                  <span className="text-[10px] font-bold uppercase truncate w-full">{getBuildingShortName(key)}</span>
+                  <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {hasSelectedCC && (
+        <div className="animate-fade-in flex flex-col h-full justify-between">
+          {!compact && (
+            <div className="mb-2">
+              <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold text-left">ШТАБ: ПОДГОТОВКА СТРОИТЕЛЬНЫХ ДРОНОВ</h4>
+              <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">СТРОИТЕЛИ ИГРАЮТ КЛЮЧЕВУЮ РОЛЬ В СТРОИТЕЛЬСТВЕ СЕКТОРОВ</span>
+            </div>
+          )}
+          {compact && <h4 className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-1">Штаб · дроны</h4>}
+          <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4'}`}>
+            {(['builder'] as UnitType[]).map(key => {
+              const prop = getFactionUnitProperties(key, selfPlayer.faction);
+              const canAfford = credits >= prop.cost;
+              return (
+                <button
+                  key={key}
+                  onClick={() => handleTrainUnit(key)}
+                  {...bindTooltip('unit', key)}
+                  disabled={!canAfford}
+                  className="prod-btn"
+                >
+                  <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
+                  <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {hasSelectedBarracks && (
+        <div className="animate-fade-in flex flex-col h-full justify-between">
+          {!compact && (
+            <div className="mb-2 flex justify-between items-center">
+              <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold text-left">КАЗАРМА: МОДУЛЬНАЯ СБОРКА РОБОТОТЕХНИКИ И ОТРЯДОВ</h4>
+              <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">ДЕСАНТ И ДРОНЫ-КАМИКАДЗЕ ДЛЯ БЫСТРЫХ СХВАТОК</span>
+            </div>
+          )}
+          {compact && <h4 className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-1">Казарма · пехота</h4>}
+          <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
+            {(['drone_scout', 'drone_kamikaze', 'cyber_specops'] as UnitType[]).map(key => {
+              const prop = getFactionUnitProperties(key, selfPlayer.faction);
+              const canAfford = credits >= prop.cost;
+              return (
+                <button
+                  key={key}
+                  onClick={() => handleTrainUnit(key)}
+                  {...bindTooltip('unit', key)}
+                  disabled={!canAfford}
+                  className="prod-btn"
+                >
+                  <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
+                  <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {hasSelectedWarFactory && (
+        <div className="animate-fade-in flex flex-col h-full justify-between">
+          {!compact && (
+            <div className="mb-2 flex justify-between items-center">
+              <h4 className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-bold text-left">ВОЕННЫЙ ЗАВОД: СБОРКА ТЯЖЕЛОЙ БРОНЕТЕХНИКИ</h4>
+              <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">ПРОИЗВОДИТЕЛЬ ТАНКОВ, РСЗО, ГАРВЕСТЕРОВ И ПОДАВИТЕЛЕЙ ПОМЕХ</span>
+            </div>
+          )}
+          {compact && <h4 className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-1">Завод · техника</h4>}
+          <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5'}`}>
+            {(['precision_tank', 'artillery_mlrs', 'mobile_jammer', 'harvester'] as UnitType[]).map(key => {
+              const prop = getFactionUnitProperties(key, selfPlayer.faction);
+              const canAfford = credits >= prop.cost;
+              return (
+                <button
+                  key={key}
+                  onClick={() => handleTrainUnit(key)}
+                  {...bindTooltip('unit', key)}
+                  disabled={!canAfford}
+                  className="prod-btn"
+                >
+                  <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
+                  <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!isContextActive && !compact && (
+        <div className="bg-slate-950/40 border border-slate-900/85 p-3.5 rounded-xl text-center space-y-3 shadow-inner">
+          <p className="text-[11px] font-mono text-cyan-500 animate-pulse uppercase tracking-widest font-bold">ОПЕРАТИВНЫЙ ШТАБ</p>
+          <p className="text-[10px] text-slate-400 leading-normal">
+            Кликните по дружественному <span className="text-slate-200 font-semibold uppercase">Штабу</span>, <span className="text-slate-200 font-semibold uppercase">Строителю</span> или <span className="text-slate-200 font-semibold uppercase">Заводу</span> на поле боя для активации меню заказов.
+          </p>
+          <div className="flex flex-col items-stretch gap-1 text-[10px] font-mono border-t border-slate-900/60 pt-2 text-slate-500">
+            <div className="flex justify-between">
+              <span>ФРАКЦИЯ:</span>
+              <span className="text-slate-350 font-bold uppercase text-cyan-400">{selfPlayer.faction}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>ЛИМИТ НА КАРТЕ:</span>
+              <span className="text-slate-350">{simulationRef.current?.entities.filter(e => e.playerId === playerId && e.state !== 'dead').length || 0} ЕД.</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!isContextActive && compact && (
+        <div className="text-center px-2 py-1.5">
+          <p className="text-[10px] font-mono text-cyan-500 uppercase tracking-wider font-bold">Оперативный штаб</p>
+          <p className="text-[9px] text-slate-400 leading-snug mt-0.5">Выберите Штаб, Строителя или Завод на карте, чтобы открыть заказы.</p>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="h-[100dvh] w-screen bg-[#070b0e] text-slate-100 flex flex-col relative select-none font-sans overflow-hidden">
       {/* 3D Viewport container */}
@@ -4867,8 +5169,9 @@ export default function RTSGameCanvas({
         ))}
       </div>
 
-      {/* Modern Bottom Horizontal HUD Command Panel containing minimap, tactical superweapon, and dynamic assembly yards */}
-      <div className={`absolute left-2 right-2 bottom-2 md:left-4 md:right-4 md:bottom-4 max-h-[46vh] md:max-h-none h-auto md:h-[224px] ui-panel ui-railed p-2 md:p-4 flex flex-row gap-2 md:gap-5 z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-y-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
+      {/* Desktop Bottom Horizontal HUD Command Panel containing minimap, tactical superweapon, and dynamic assembly yards */}
+      {!isMobile && (
+      <div className={`absolute left-4 right-4 bottom-4 h-[224px] ui-panel ui-railed p-4 flex flex-row gap-5 z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-y-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
 
         {/* Toggle Collapse handle anchored on top border of panel */}
         <button
@@ -5035,8 +5338,7 @@ export default function RTSGameCanvas({
                       <button
                         key={key}
                         onClick={() => activeConstructionMode(key)}
-                        onMouseEnter={() => setHoveredItem({ type: 'building', key })}
-                        onMouseLeave={() => setHoveredItem(null)}
+                        {...bindTooltip('building', key)}
                         disabled={!canAfford}
                         className={`prod-btn ${active ? 'is-active' : ''}`}
                       >
@@ -5064,8 +5366,7 @@ export default function RTSGameCanvas({
                       <button
                         key={key}
                         onClick={() => handleTrainUnit(key)}
-                        onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
-                        onMouseLeave={() => setHoveredItem(null)}
+                        {...bindTooltip('unit', key)}
                         disabled={!canAfford}
                         className="prod-btn"
                       >
@@ -5093,8 +5394,7 @@ export default function RTSGameCanvas({
                       <button
                         key={key}
                         onClick={() => handleTrainUnit(key)}
-                        onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
-                        onMouseLeave={() => setHoveredItem(null)}
+                        {...bindTooltip('unit', key)}
                         disabled={!canAfford}
                         className="prod-btn"
                       >
@@ -5122,8 +5422,7 @@ export default function RTSGameCanvas({
                       <button
                         key={key}
                         onClick={() => handleTrainUnit(key)}
-                        onMouseEnter={() => setHoveredItem({ type: 'unit', key })}
-                        onMouseLeave={() => setHoveredItem(null)}
+                        {...bindTooltip('unit', key)}
                         disabled={!canAfford}
                         className="prod-btn"
                       >
@@ -5156,8 +5455,9 @@ export default function RTSGameCanvas({
               </div>
             )}
 
-            {/* Gorgeous glowing 2-second hover tooltip display */}
-            {hoveredItem && tooltipVisible && (
+            {/* In-menu tooltip retired — info now floats next to the cursor/finger
+                (see the fixed card near the end of this component). */}
+            {false && hoveredItem && tooltipVisible && (
               <div className="border border-cyan-800/45 bg-cyan-950/25 p-3 rounded-xl animate-fade-in shadow-lg text-left">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-[10.5px] font-bold text-cyan-300 uppercase">
@@ -5183,8 +5483,97 @@ export default function RTSGameCanvas({
         </div>
 
       </div>
+      )}
 
+      {/* Mobile bottom command dock — overlays the fullscreen battlefield.
+          Collapsed shows only a translucent arrow so the map keeps the whole
+          screen; expanded shows a compact, mobile-tailored command panel. */}
+      {isMobile && (isMenuCollapsed ? (
+        <button
+          onClick={() => { setIsMenuCollapsed(false); sound.playClick(); }}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 w-14 h-9 rounded-full bg-black/35 hover:bg-black/55 backdrop-blur-md border border-cyan-500/30 flex items-center justify-center text-cyan-300 shadow-lg active:scale-95 transition"
+          title="Открыть панель управления"
+        >
+          <ChevronUp className="w-5 h-5" />
+        </button>
+      ) : (
+        <div className="absolute left-1.5 right-1.5 bottom-1.5 z-20 max-h-[44vh] bg-slate-950/80 backdrop-blur-md border border-slate-700/60 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+          {/* Handle row */}
+          <div className="flex items-center justify-between px-3 py-1 border-b border-slate-800/70 shrink-0">
+            <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Radar className="w-3 h-3 text-cyan-400" /> Командование
+            </span>
+            <button
+              onClick={() => { setIsMenuCollapsed(true); sound.playClick(); }}
+              className="text-slate-400 hover:text-cyan-300 p-1 -m-1 active:scale-90 transition"
+              title="Свернуть панель"
+            >
+              <ChevronDown className="w-5 h-5" />
+            </button>
+          </div>
 
+          {/* Radar + production */}
+          <div className="flex flex-row gap-2 p-2 min-h-0 overflow-hidden">
+            <div className="shrink-0">
+              {renderMinimapBox('w-[84px] h-[84px] bg-[#0b1016] border border-slate-800 rounded-lg relative overflow-hidden cursor-crosshair shadow-inner')}
+            </div>
+            <div className="flex-1 min-w-0 overflow-y-auto">
+              {renderProductionContent(true)}
+            </div>
+          </div>
+
+          {/* Compact superweapon row */}
+          <div className="flex items-center gap-2 px-2 pb-2 shrink-0">
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between items-center text-[8px] font-mono text-slate-400 mb-0.5">
+                <span className="truncate uppercase">{getCommandPowerName(selfPlayer.faction)}</span>
+                <span className={commandCharge >= 100 ? 'text-cyan-400 font-bold' : 'text-cyan-600'}>{commandCharge}%</span>
+              </div>
+              <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800">
+                <div
+                  className={`h-full transition-all duration-300 ${commandCharge >= 100 ? 'bg-gradient-to-r from-cyan-400 to-cyan-500 animate-pulse' : 'bg-cyan-600/70'}`}
+                  style={{ width: `${commandCharge}%` }}
+                />
+              </div>
+            </div>
+            <button
+              onClick={handleCommandStrikeSelection}
+              disabled={commandCharge < 100}
+              className={`ui-btn shrink-0 text-[10px] uppercase tracking-wide py-2 px-3 ${commandCharge >= 100 ? 'ui-btn-primary clip-bevel-sm' : 'ui-btn-ghost'}`}
+            >
+              {commandCharge >= 100 ? <><Crosshair className="w-3.5 h-3.5" /> Удар</> : 'Заряд...'}
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {/* Floating info card — follows the cursor on desktop, sits by the finger
+          on a long-press on mobile. Replaces the old in-menu tooltip that jumped. */}
+      {hoveredItem && tooltipVisible && (() => {
+        const prop = hoveredItem.type === 'unit'
+          ? getFactionUnitProperties(hoveredItem.key as UnitType, selfPlayer.faction)
+          : getFactionBuildingProperties(hoveredItem.key as BuildingType, selfPlayer.faction);
+        const vw = typeof window !== 'undefined' ? window.innerWidth : 0;
+        const vh = typeof window !== 'undefined' ? window.innerHeight : 0;
+        const flipX = tooltipPos.x + 18 + 210 > vw;
+        const top = Math.min(tooltipPos.y + 18, Math.max(8, vh - 120));
+        return (
+          <div
+            className="fixed z-50 pointer-events-none w-[210px] border border-cyan-700/50 bg-slate-950/92 backdrop-blur-md p-2.5 rounded-xl shadow-2xl text-left animate-fade-in"
+            style={{
+              left: flipX ? undefined : tooltipPos.x + 18,
+              right: flipX ? (vw - tooltipPos.x + 18) : undefined,
+              top
+            }}
+          >
+            <div className="flex justify-between items-center mb-1 gap-2">
+              <span className="text-[11px] font-bold text-cyan-300 uppercase leading-tight">{prop.name}</span>
+              <span className="text-[10px] font-mono font-bold text-emerald-400 shrink-0">${prop.cost}</span>
+            </div>
+            <p className="text-[10px] text-slate-300/80 leading-relaxed font-mono">{prop.desc}</p>
+          </div>
+        );
+      })()}
 
       {/* Mobile-tailored Touch Actions Dashboard — pinned to the top centre so it
           never collides with the bottom command panel (which now fits on screen). */}
