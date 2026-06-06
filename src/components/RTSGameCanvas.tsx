@@ -109,10 +109,19 @@ export default function RTSGameCanvas({
   const isMobile = useIsMobile();
   const [mobileMode, setMobileMode] = useState<'select' | 'order'>('select');
   const mobileModeRef = useRef<'select' | 'order'>('select');
+  // Live mirror of isMobile usable inside the long-lived Three.js effect closures
+  // (which only re-run on game start). Lets us disable desktop mouse/edge-scroll
+  // controls on touch devices — phones emit synthetic mouse events after touches,
+  // which would otherwise double-fire alongside the dedicated touch handlers.
+  const isMobileRef = useRef<boolean>(isMobile);
 
   useEffect(() => {
     mobileModeRef.current = mobileMode;
   }, [mobileMode]);
+
+  useEffect(() => {
+    isMobileRef.current = isMobile;
+  }, [isMobile]);
 
   // On touch / narrow devices the command dock starts collapsed (only the
   // floating arrow is shown) so the battlefield map gets the full screen.
@@ -403,18 +412,21 @@ export default function RTSGameCanvas({
       let moveLeft = keysPressed['a'] || keysPressed['arrowleft'];
       let moveRight = keysPressed['d'] || keysPressed['arrowright'];
 
-      // Edge scrolling: mouse close to edges triggers pan
-      if (mouseY > 0 && mouseY < 30) {
-        moveForward = true;
-      }
-      if (mouseY > 0 && mouseY > wHeight - 30) {
-        moveBackward = true;
-      }
-      if (mouseX > 0 && mouseX < 30) {
-        moveLeft = true;
-      }
-      if (mouseX > 0 && mouseX > wWidth - 30) {
-        moveRight = true;
+      // Edge scrolling: mouse close to edges triggers pan (desktop only —
+      // phones drag-scroll via touch and would false-trigger on synthetic events)
+      if (!isMobileRef.current) {
+        if (mouseY > 0 && mouseY < 30) {
+          moveForward = true;
+        }
+        if (mouseY > 0 && mouseY > wHeight - 30) {
+          moveBackward = true;
+        }
+        if (mouseX > 0 && mouseX < 30) {
+          moveLeft = true;
+        }
+        if (mouseX > 0 && mouseX > wWidth - 30) {
+          moveRight = true;
+        }
       }
 
       if (moveForward) {
@@ -2360,6 +2372,7 @@ export default function RTSGameCanvas({
     }[] = [];
 
     const handleMouseDown = (e: MouseEvent) => {
+      if (isMobileRef.current) return; // touch devices use the dedicated touch handlers
       if (e.button !== 0) return; // Only trigger for left-clicks
       isMouseDown = true;
       mouseDownPos.x = e.clientX;
@@ -2367,6 +2380,7 @@ export default function RTSGameCanvas({
     };
 
     const handleMouseMoveSelection = (e: MouseEvent) => {
+      if (isMobileRef.current) return;
       if (!isMouseDown) return;
       const deltaX = Math.abs(e.clientX - mouseDownPos.x);
       const deltaY = Math.abs(e.clientY - mouseDownPos.y);
@@ -2383,6 +2397,7 @@ export default function RTSGameCanvas({
     };
 
     const handleMouseUp = (e: MouseEvent) => {
+      if (isMobileRef.current) return; // touch devices use the dedicated touch handlers
       if (e.button === 0) {
         // --- LEFT CLICK RELEASE (Selection block) ---
         isMouseDown = false;
@@ -4955,7 +4970,7 @@ export default function RTSGameCanvas({
             </div>
           )}
           {compact && <h4 className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-1">Строитель · постройки</h4>}
-          <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6'}`}>
+          <div className={`grid gap-1.5 ${compact ? 'grid-cols-4 landscape:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6'}`}>
             {(['power_plant', 'supply_refinery', 'oil_derrick', 'barracks', 'war_factory', 'defense_turret'] as BuildingType[]).map(key => {
               const prop = getFactionBuildingProperties(key, selfPlayer.faction);
               const active = buildingToPlace === key;
@@ -4966,7 +4981,7 @@ export default function RTSGameCanvas({
                   onClick={() => activeConstructionMode(key)}
                   {...bindTooltip('building', key)}
                   disabled={!canAfford}
-                  className={`prod-btn ${active ? 'is-active' : ''}`}
+                  className={`prod-btn ${compact ? 'prod-btn-compact' : ''} ${active ? 'is-active' : ''}`}
                 >
                   <span className="text-[10px] font-bold uppercase truncate w-full">{getBuildingShortName(key)}</span>
                   <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
@@ -4996,7 +5011,7 @@ export default function RTSGameCanvas({
                   onClick={() => handleTrainUnit(key)}
                   {...bindTooltip('unit', key)}
                   disabled={!canAfford}
-                  className="prod-btn"
+                  className={`prod-btn ${compact ? 'prod-btn-compact' : ''}`}
                 >
                   <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
                   <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
@@ -5016,7 +5031,7 @@ export default function RTSGameCanvas({
             </div>
           )}
           {compact && <h4 className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-1">Казарма · пехота</h4>}
-          <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
+          <div className={`grid gap-1.5 ${compact ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
             {(['drone_scout', 'drone_kamikaze', 'cyber_specops'] as UnitType[]).map(key => {
               const prop = getFactionUnitProperties(key, selfPlayer.faction);
               const canAfford = credits >= prop.cost;
@@ -5026,7 +5041,7 @@ export default function RTSGameCanvas({
                   onClick={() => handleTrainUnit(key)}
                   {...bindTooltip('unit', key)}
                   disabled={!canAfford}
-                  className="prod-btn"
+                  className={`prod-btn ${compact ? 'prod-btn-compact' : ''}`}
                 >
                   <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
                   <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
@@ -5046,7 +5061,7 @@ export default function RTSGameCanvas({
             </div>
           )}
           {compact && <h4 className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-1">Завод · техника</h4>}
-          <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5'}`}>
+          <div className={`grid gap-1.5 ${compact ? 'grid-cols-4' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5'}`}>
             {(['precision_tank', 'artillery_mlrs', 'mobile_jammer', 'harvester'] as UnitType[]).map(key => {
               const prop = getFactionUnitProperties(key, selfPlayer.faction);
               const canAfford = credits >= prop.cost;
@@ -5056,7 +5071,7 @@ export default function RTSGameCanvas({
                   onClick={() => handleTrainUnit(key)}
                   {...bindTooltip('unit', key)}
                   disabled={!canAfford}
-                  className="prod-btn"
+                  className={`prod-btn ${compact ? 'prod-btn-compact' : ''}`}
                 >
                   <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
                   <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>

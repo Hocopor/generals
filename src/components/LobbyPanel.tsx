@@ -5,7 +5,7 @@ import { sound } from '../utils/audio';
 import { useIsMobile } from '../utils/useIsMobile';
 import {
   Shield, Users, Radio, Copy, Check, MessageSquare, Swords, Bot, Zap, Globe,
-  Radar, Crosshair, Flame, Wind, Crown, Send, ChevronRight, Cpu, Wifi
+  Radar, Crosshair, Flame, Wind, Crown, Send, ChevronRight, ChevronLeft, Cpu, Wifi
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -118,6 +118,10 @@ export default function LobbyPanel({
   const [chatText, setChatText] = useState('');
   const [isCopied, setIsCopied] = useState(false);
   const isMobile = useIsMobile();
+  // Mobile multi-step setup wizard. Landscape phones can't fit the whole
+  // single-screen setup, so we split it across small steps with Back/Next nav.
+  // mode → faction → (single: config | multi: network).
+  const [mobileStep, setMobileStep] = useState<'mode' | 'faction' | 'config' | 'network'>('mode');
 
   const uniqueTeams = lobby ? new Set(lobby.players.map(p => p.team)) : new Set();
   const allOnSameTeam = lobby ? (lobby.players.length > 1 && uniqueTeams.size <= 1) : false;
@@ -195,6 +199,28 @@ export default function LobbyPanel({
     sound.playOrder();
     const randId = Math.random().toString(36).substring(2, 8).toUpperCase();
     onJoinFriendsLobby(playerName, selectedFaction, selectedTeam, randId);
+  };
+
+  // ---- Mobile setup wizard navigation ----
+  const mobileSteps: typeof mobileStep[] = activeTab === 'single'
+    ? ['mode', 'faction', 'config']
+    : ['mode', 'faction', 'network'];
+  const mobileStepIndex = Math.max(0, mobileSteps.indexOf(mobileStep));
+
+  const mobilePickMode = (tab: 'single' | 'multi') => {
+    setActiveTab(tab);
+    sound.playClick();
+    setMobileStep('faction');
+  };
+  const mobileGoNext = () => {
+    sound.playClick();
+    if (mobileStep === 'mode') setMobileStep('faction');
+    else if (mobileStep === 'faction') setMobileStep(activeTab === 'single' ? 'config' : 'network');
+  };
+  const mobileGoBack = () => {
+    sound.playClick();
+    if (mobileStep === 'faction') setMobileStep('mode');
+    else if (mobileStep === 'config' || mobileStep === 'network') setMobileStep('faction');
   };
 
   const handleCopyLink = () => {
@@ -361,134 +387,178 @@ export default function LobbyPanel({
               </div>
             </div>
           ) : (
-            /* ---------------- SETUP (mobile) ---------------- */
-            <>
-              {/* Mode tabs */}
-              <div className="flex bg-slate-950/70 border border-slate-800/80 p-1 rounded-xl shrink-0">
-                <button
-                  onClick={() => { setActiveTab('single'); sound.playClick(); }}
-                  className={`ui-btn flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs uppercase tracking-wide ${activeTab === 'single' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'}`}
-                >
-                  <Bot className="w-3.5 h-3.5" /> Одиночная
-                </button>
-                <button
-                  onClick={() => { setActiveTab('multi'); sound.playClick(); }}
-                  className={`ui-btn flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs uppercase tracking-wide ${activeTab === 'multi' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'}`}
-                >
-                  <Globe className="w-3.5 h-3.5" /> Мультиплеер
-                </button>
+            /* ---------------- SETUP WIZARD (mobile) ---------------- */
+            <div className="flex flex-col flex-1 min-h-0 gap-2">
+              {/* Step indicator */}
+              <div className="flex items-center justify-center gap-1.5 shrink-0">
+                {mobileSteps.map((s, i) => (
+                  <span
+                    key={s}
+                    className={`h-1.5 rounded-full transition-all ${i === mobileStepIndex ? 'w-6 bg-cyan-400' : i < mobileStepIndex ? 'w-1.5 bg-cyan-700' : 'w-1.5 bg-slate-700'}`}
+                  />
+                ))}
               </div>
 
-              {activeTab === 'single' ? (
-                <div className="flex flex-col flex-1 min-h-0 gap-2">
-                  {/* Faction picker 2x2 */}
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500 font-semibold mb-1.5">Фракция командования</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {FACTIONS.map((fac) => {
-                        const isSelected = selectedFaction === fac.value;
-                        const FacIcon = fac.icon;
-                        return (
-                          <button
-                            key={fac.value}
-                            onClick={() => c_updatePlayerFaction(fac.value)}
-                            className="text-left p-2.5 rounded-xl border transition relative overflow-hidden"
-                            style={isSelected
-                              ? { background: `rgb(${fac.rgb} / 0.12)`, borderColor: `rgb(${fac.rgb} / 0.75)` }
-                              : { background: 'rgb(2 6 12 / 0.45)', borderColor: 'rgb(148 163 184 / 0.14)' }}
-                          >
-                            <span className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: fac.hex, opacity: isSelected ? 1 : 0.3 }} />
-                            <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-lg flex items-center justify-center border shrink-0" style={{ background: `rgb(${fac.rgb} / 0.15)`, borderColor: `rgb(${fac.rgb} / 0.4)`, color: fac.hex }}>
-                                <FacIcon className="w-4 h-4" />
-                              </div>
-                              <h3 className="font-black text-[11px] tracking-wide truncate" style={{ color: isSelected ? fac.hex : 'rgb(226 232 240)' }}>{fac.short}</h3>
-                            </div>
-                            <p className="text-[9px] text-slate-400 leading-snug mt-1 line-clamp-2">{fac.desc}</p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Team + enemy count */}
-                  <div className="ui-panel ui-panel-tight p-2.5 space-y-2 shrink-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Команда</span>
-                      <select value={selectedTeam} onChange={(e) => c_updatePlayerTeam(parseInt(e.target.value))} className="ui-select text-[11px] font-mono py-1 px-2 text-cyan-300">
-                        {[1, 2, 3, 4, 5].map(t => <option key={t} value={t}>Команда {t}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-slate-300 font-semibold uppercase tracking-wide flex justify-between">
-                        <span>Количество врагов</span>
-                        <span className="text-cyan-400 font-bold font-mono">{aiCount} / 5</span>
-                      </label>
-                      <input type="range" min="1" max="5" value={aiCount} onChange={(e) => { setAiCount(parseInt(e.target.value)); sound.playClick(); }} className="w-full accent-cyan-400 bg-slate-900 h-1.5 rounded cursor-pointer" />
-                    </div>
-                  </div>
-
-                  {/* AI opponents */}
-                  <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-0.5">
-                    <p className="text-[9px] text-slate-500 uppercase tracking-[0.14em] font-semibold sticky top-0 bg-slate-950/80 backdrop-blur py-0.5">Оппоненты ИИ</p>
-                    {aiSetups.map((ai, index) => {
-                      const FacIcon = FACTIONS.find(f => f.value === ai.faction)?.icon || Bot;
-                      const facHex = FACTIONS.find(f => f.value === ai.faction)?.hex || '#94a3b8';
+              {/* Step content */}
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {/* STEP 1 — mode */}
+                {mobileStep === 'mode' && (
+                  <div className="grid grid-cols-2 gap-2.5 h-full">
+                    {([
+                      { tab: 'single' as const, icon: Bot, title: 'Одиночная', desc: 'Сражение против командиров ИИ на процедурной карте.' },
+                      { tab: 'multi' as const, icon: Globe, title: 'Мультиплеер', desc: 'Быстрый подбор или комната с друзьями по сети.' }
+                    ]).map(({ tab, icon: Icon, title, desc }) => {
+                      const active = activeTab === tab;
                       return (
-                        <div key={ai.id} className="p-2 bg-slate-950/50 border border-slate-800/80 rounded-lg flex gap-2 justify-between items-center text-xs">
-                          <span className="font-semibold text-slate-300 font-mono text-[10px] flex items-center gap-1.5 min-w-0">
-                            <FacIcon className="w-3.5 h-3.5 shrink-0" style={{ color: facHex }} />
-                            <span className="truncate">{ai.name.replace('General', 'Ген.')}</span>
-                          </span>
-                          <div className="flex gap-1.5 shrink-0">
-                            <select value={ai.faction} onChange={(e) => updateAiFaction(index, e.target.value as Faction)} className="ui-select text-[10px] font-mono py-1 px-1.5">
-                              {FACTIONS.map(f => <option key={f.value} value={f.value}>{f.short}</option>)}
-                            </select>
-                            <select value={ai.team} onChange={(e) => updateAiTeam(index, parseInt(e.target.value))} className="ui-select text-[10px] font-mono py-1 px-1.5">
-                              {[1, 2, 3, 4, 5].map(t => <option key={t} value={t}>Ком.{t}</option>)}
-                            </select>
+                        <button
+                          key={tab}
+                          onClick={() => mobilePickMode(tab)}
+                          className="relative overflow-hidden rounded-xl border p-3 flex flex-col items-center justify-center text-center gap-2 transition"
+                          style={active
+                            ? { background: 'rgb(34 211 238 / 0.12)', borderColor: 'rgb(34 211 238 / 0.7)' }
+                            : { background: 'rgb(2 6 12 / 0.45)', borderColor: 'rgb(148 163 184 / 0.14)' }}
+                        >
+                          <div className={`w-11 h-11 rounded-xl flex items-center justify-center border ${active ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300' : 'bg-slate-800/40 border-slate-700/50 text-slate-400'}`}>
+                            <Icon className="w-6 h-6" />
                           </div>
-                        </div>
+                          <h3 className={`font-black text-sm tracking-wide ${active ? 'text-cyan-300' : 'text-slate-200'}`}>{title}</h3>
+                          <p className="text-[10px] text-slate-400 leading-snug">{desc}</p>
+                        </button>
                       );
                     })}
                   </div>
+                )}
 
-                  {isSingleplayerAllSameTeam && (
-                    <div className="bg-rose-950/40 border border-rose-800/60 p-2 rounded-lg text-[10px] text-rose-200 shrink-0">
-                      <strong className="text-rose-100">Запуск заблокирован.</strong> Вы и боты в одной команде.
+                {/* STEP 2 — faction */}
+                {mobileStep === 'faction' && (
+                  <div className="grid grid-cols-2 landscape:grid-cols-4 gap-2">
+                    {FACTIONS.map((fac) => {
+                      const isSelected = selectedFaction === fac.value;
+                      const FacIcon = fac.icon;
+                      return (
+                        <button
+                          key={fac.value}
+                          onClick={() => c_updatePlayerFaction(fac.value)}
+                          className="text-left p-2.5 rounded-xl border transition relative overflow-hidden"
+                          style={isSelected
+                            ? { background: `rgb(${fac.rgb} / 0.12)`, borderColor: `rgb(${fac.rgb} / 0.75)` }
+                            : { background: 'rgb(2 6 12 / 0.45)', borderColor: 'rgb(148 163 184 / 0.14)' }}
+                        >
+                          <span className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: fac.hex, opacity: isSelected ? 1 : 0.3 }} />
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center border shrink-0" style={{ background: `rgb(${fac.rgb} / 0.15)`, borderColor: `rgb(${fac.rgb} / 0.4)`, color: fac.hex }}>
+                              <FacIcon className="w-4 h-4" />
+                            </div>
+                            <h3 className="font-black text-[11px] tracking-wide truncate" style={{ color: isSelected ? fac.hex : 'rgb(226 232 240)' }}>{fac.short}</h3>
+                          </div>
+                          <p className="text-[9px] text-slate-400 leading-snug mt-1 line-clamp-2">{fac.desc}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* STEP 3a — single config (team / enemies) */}
+                {mobileStep === 'config' && (
+                  <div className="grid landscape:grid-cols-2 gap-2 h-full">
+                    {/* Team + enemy count */}
+                    <div className="ui-panel ui-panel-tight p-2.5 space-y-2 self-start">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Ваша команда</span>
+                        <select value={selectedTeam} onChange={(e) => c_updatePlayerTeam(parseInt(e.target.value))} className="ui-select text-[11px] font-mono py-1 px-2 text-cyan-300">
+                          {[1, 2, 3, 4, 5].map(t => <option key={t} value={t}>Команда {t}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-slate-300 font-semibold uppercase tracking-wide flex justify-between">
+                          <span>Количество врагов</span>
+                          <span className="text-cyan-400 font-bold font-mono">{aiCount} / 5</span>
+                        </label>
+                        <input type="range" min="1" max="5" value={aiCount} onChange={(e) => { setAiCount(parseInt(e.target.value)); sound.playClick(); }} className="w-full accent-cyan-400 bg-slate-900 h-1.5 rounded cursor-pointer" />
+                      </div>
                     </div>
-                  )}
 
+                    {/* AI opponents */}
+                    <div className="min-h-0 landscape:overflow-y-auto space-y-1.5 pr-0.5">
+                      <p className="text-[9px] text-slate-500 uppercase tracking-[0.14em] font-semibold">Команды врагов</p>
+                      {aiSetups.map((ai, index) => {
+                        const FacIcon = FACTIONS.find(f => f.value === ai.faction)?.icon || Bot;
+                        const facHex = FACTIONS.find(f => f.value === ai.faction)?.hex || '#94a3b8';
+                        return (
+                          <div key={ai.id} className="p-2 bg-slate-950/50 border border-slate-800/80 rounded-lg flex gap-2 justify-between items-center text-xs">
+                            <span className="font-semibold text-slate-300 font-mono text-[10px] flex items-center gap-1.5 min-w-0">
+                              <FacIcon className="w-3.5 h-3.5 shrink-0" style={{ color: facHex }} />
+                              <span className="truncate">{ai.name.replace('General', 'Ген.')}</span>
+                            </span>
+                            <div className="flex gap-1.5 shrink-0">
+                              <select value={ai.faction} onChange={(e) => updateAiFaction(index, e.target.value as Faction)} className="ui-select text-[10px] font-mono py-1 px-1.5">
+                                {FACTIONS.map(f => <option key={f.value} value={f.value}>{f.short}</option>)}
+                              </select>
+                              <select value={ai.team} onChange={(e) => updateAiTeam(index, parseInt(e.target.value))} className="ui-select text-[10px] font-mono py-1 px-1.5">
+                                {[1, 2, 3, 4, 5].map(t => <option key={t} value={t}>Ком.{t}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {isSingleplayerAllSameTeam && (
+                        <div className="bg-rose-950/40 border border-rose-800/60 p-2 rounded-lg text-[10px] text-rose-200">
+                          <strong className="text-rose-100">Запуск заблокирован.</strong> Вы и боты в одной команде.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 3b — multiplayer network */}
+                {mobileStep === 'network' && (
+                  <div className="grid landscape:grid-cols-2 gap-2.5 h-full content-center">
+                    <div className="ui-panel ui-panel-tight p-3 space-y-2">
+                      <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" /> Быстрый подбор</h3>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">Подключайтесь к другим генералам. Таймер запуска активируется при 2+ игроках.</p>
+                      <button onClick={() => { sound.playLaunch(); onJoinMatchmaking(playerName, selectedFaction, selectedTeam); }} className="ui-btn ui-btn-ghost w-full text-[11px] uppercase tracking-wide py-2.5 border-cyan-700/50 text-cyan-300">
+                        Найти игру · {matchmakingQueueCount} в очереди
+                      </button>
+                    </div>
+                    <div className="ui-panel ui-panel-tight p-3 space-y-2">
+                      <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2"><Users className="w-4 h-4 text-cyan-400" /> Игра с друзьями</h3>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">Создайте комнату и получите ссылку-приглашение для друзей.</p>
+                      <button onClick={handleCreateCustom} className="ui-btn ui-btn-primary clip-bevel-sm w-full text-[11px] uppercase tracking-wide py-2.5">
+                        <ChevronRight className="w-4 h-4" /> Создать комнату
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Wizard footer nav */}
+              <div className="flex items-center gap-2 shrink-0">
+                {mobileStep !== 'mode' && (
+                  <button onClick={mobileGoBack} className="ui-btn ui-btn-ghost flex items-center gap-1 text-[11px] uppercase tracking-wide py-2.5 px-4">
+                    <ChevronLeft className="w-4 h-4" /> Назад
+                  </button>
+                )}
+                {mobileStep === 'faction' && (
+                  <button onClick={mobileGoNext} className="ui-btn ui-btn-primary clip-bevel-sm flex-1 flex items-center justify-center gap-1 uppercase tracking-widest py-2.5">
+                    Далее <ChevronRight className="w-4 h-4" />
+                  </button>
+                )}
+                {mobileStep === 'config' && (
                   <button
                     onClick={handleLaunchSingleplayer}
                     disabled={isSingleplayerAllSameTeam}
-                    className="ui-btn ui-btn-primary clip-bevel w-full uppercase tracking-widest py-3 shrink-0"
+                    className="ui-btn ui-btn-primary clip-bevel flex-1 flex items-center justify-center gap-2 uppercase tracking-widest py-2.5"
                   >
                     <Swords className="w-4 h-4" /> В бой
                   </button>
-                </div>
-              ) : (
-                <div className="flex flex-col flex-1 min-h-0 gap-2.5 justify-center">
-                  <div className="ui-panel ui-panel-tight p-3 space-y-2">
-                    <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" /> Быстрый подбор</h3>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">Подключайтесь к другим генералам. Таймер запуска активируется при 2+ игроках.</p>
-                    <button onClick={() => { sound.playLaunch(); onJoinMatchmaking(playerName, selectedFaction, selectedTeam); }} className="ui-btn ui-btn-ghost w-full text-[11px] uppercase tracking-wide py-2.5 border-cyan-700/50 text-cyan-300">
-                      Найти игру · {matchmakingQueueCount} в очереди
-                    </button>
-                  </div>
-                  <div className="ui-panel ui-panel-tight p-3 space-y-2">
-                    <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2"><Users className="w-4 h-4 text-cyan-400" /> Игра с друзьями</h3>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">Создайте комнату и получите ссылку-приглашение для друзей.</p>
-                    <button onClick={handleCreateCustom} className="ui-btn ui-btn-primary clip-bevel-sm w-full text-[11px] uppercase tracking-wide py-2.5">
-                      <ChevronRight className="w-4 h-4" /> Создать комнату
-                    </button>
-                  </div>
-                  <p className="text-[9px] text-slate-500 leading-relaxed flex items-center gap-1.5 px-1">
-                    <Cpu className="w-3 h-3 text-slate-600 shrink-0" /> Связь по WebSocket. Задайте имя генерала вверху перед запуском.
+                )}
+                {mobileStep === 'network' && (
+                  <p className="flex-1 text-center text-[9px] text-slate-500 leading-tight flex items-center justify-center gap-1.5">
+                    <Cpu className="w-3 h-3 text-slate-600 shrink-0" /> Связь по WebSocket. Имя генерала — вверху.
                   </p>
-                </div>
-              )}
-            </>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
