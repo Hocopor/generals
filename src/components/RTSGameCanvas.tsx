@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { Faction, Lobby, Player, GameEntity, BuildingType, UnitType, GameActionEvent } from '../types';
 import { sound } from '../utils/audio';
 import { generateProceduralMap, GeneratedMap, MapNode } from '../utils/mapGenerator';
-import { getFactionUnitProperties, getFactionBuildingProperties } from '../utils/factionProperties';
+import { getFactionUnitProperties, getFactionBuildingProperties, getUnitShortName, getBuildingShortName } from '../utils/factionProperties';
 import { Shield, Zap, Swords, Play, RefreshCw, AlertTriangle, ChevronRight, ChevronUp, ChevronDown, Coins, LogOut, Radar, Crosshair, Target } from 'lucide-react';
 
 interface RTSGameCanvasProps {
@@ -129,6 +129,10 @@ export default function RTSGameCanvas({
   const [hoveredItem, setHoveredItem] = useState<{ type: 'unit' | 'building'; key: string } | null>(null);
   const [tooltipVisible, setTooltipVisible] = useState<boolean>(false);
 
+  // Lets the minimap (rendered in JSX) query the fog-of-war grid that lives
+  // inside the Three.js effect closure, so the radar respects vision too.
+  const fogQueryRef = useRef<{ visible: (x: number, z: number) => boolean; explored: (x: number, z: number) => boolean } | null>(null);
+
   // Internal simulated references (for THREE.js loop connection)
   const simulationRef = useRef<{
     entities: GameEntity[];
@@ -185,7 +189,8 @@ export default function RTSGameCanvas({
     if (type === 'warn') sound.playAlert();
   };
 
-  // 2-second hover tooltip timer watcher
+  // Hover tooltip timer watcher — short delay so the full name + description
+  // surface quickly when hovering a build button (Generals-style).
   useEffect(() => {
     if (!hoveredItem) {
       setTooltipVisible(false);
@@ -193,7 +198,7 @@ export default function RTSGameCanvas({
     }
     const timer = setTimeout(() => {
       setTooltipVisible(true);
-    }, 2000); // exact 2 seconds hover delay as specified!
+    }, 300);
     return () => clearTimeout(timer);
   }, [hoveredItem]);
 
@@ -611,6 +616,8 @@ export default function RTSGameCanvas({
     });
 
     // Add natural map decorations (Trees, rocks, ruins, bushes)
+    // Tracked with positions so the fog of war can hide unexplored scenery.
+    const decoGroups: { group: THREE.Group; x: number; z: number }[] = [];
     if (map.decorations) {
       map.decorations.forEach((dec, idx) => {
         const decGroup = new THREE.Group();
@@ -700,8 +707,109 @@ export default function RTSGameCanvas({
         }
 
         scene.add(decGroup);
+        decoGroups.push({ group: decGroup, x: dec.x, z: dec.z });
       });
     }
+
+    // ============================================================
+    // FOG OF WAR
+    // A per-cell visibility grid drives a soft dark overlay that hugs the
+    // terrain. 0 = never seen (full black), 1 = explored but currently out of
+    // sight (dim shroud), 2 = in active sight of a friendly unit (clear).
+    // Enemy units, neutral scenery and resource rigs are only revealed where
+    // there is vision, exactly like classic C&C Generals.
+    // ============================================================
+    const FOG_UNSEEN = 0, FOG_EXPLORED = 1, FOG_VISIBLE = 2;
+    // Grid indexed [x * gridS + z]; world coords map 1:1 to cell indices.
+    const fogGrid = new Uint8Array(gridS * gridS); // all unseen initially
+
+    // DataTexture: black RGB, per-texel alpha encodes how much fog covers it.
+    const fogTexW = gridS, fogTexH = gridS;
+    const fogData = new Uint8Array(fogTexW * fogTexH * 4);
+    for (let i = 0; i < fogTexW * fogTexH; i++) fogData[i * 4 + 3] = 245; // start fully fogged
+    const fogTexture = new THREE.DataTexture(fogData, fogTexW, fogTexH, THREE.RGBAFormat);
+    fogTexture.minFilter = THREE.LinearFilter;
+    fogTexture.magFilter = THREE.LinearFilter;
+    fogTexture.needsUpdate = true;
+
+    // Overlay mesh follows the terrain so the shroud sits flush on hills.
+    const fogSegs = Math.min(gridS - 1, 120);
+    const fogGeo = new THREE.PlaneGeometry(gridS, gridS, fogSegs, fogSegs);
+    fogGeo.rotateX(-Math.PI / 2);
+    fogGeo.translate(gridS / 2, 0, gridS / 2);
+    {
+      const fp = fogGeo.attributes.position;
+      for (let i = 0; i < fp.count; i++) {
+        fp.setY(i, getTerrainHeight(fp.getX(i), fp.getZ(i), map) + 0.35);
+      }
+      fp.needsUpdate = true;
+    }
+    const fogMat = new THREE.MeshBasicMaterial({
+      map: fogTexture,
+      transparent: true,
+      depthWrite: false,
+      color: 0x05080b
+    });
+    const fogMesh = new THREE.Mesh(fogGeo, fogMat);
+    fogMesh.renderOrder = 5; // draw over terrain/water/scenery
+    scene.add(fogMesh);
+
+    // Returns the sight radius (world units) a friendly entity reveals.
+    const sightRadius = (ent: GameEntity): number => {
+      if (ent.type === 'building') return ent.subType === 'command_center' ? 14 : 10;
+      if (ent.subType === 'drone_scout') return 16;
+      if (ent.subType === 'artillery_mlrs') return 13;
+      return 9;
+    };
+
+    const isVisibleAt = (x: number, z: number): boolean => {
+      const cx = Math.round(x), cz = Math.round(z);
+      if (cx < 0 || cz < 0 || cx >= gridS || cz >= gridS) return false;
+      return fogGrid[cx * gridS + cz] === FOG_VISIBLE;
+    };
+    const isExploredAt = (x: number, z: number): boolean => {
+      const cx = Math.round(x), cz = Math.round(z);
+      if (cx < 0 || cz < 0 || cx >= gridS || cz >= gridS) return false;
+      return fogGrid[cx * gridS + cz] !== FOG_UNSEEN;
+    };
+    fogQueryRef.current = { visible: isVisibleAt, explored: isExploredAt };
+
+    // Recompute the whole grid and push it into the texture. Throttled in the
+    // game loop — this is the only O(cells) work the fog does per refresh.
+    const refreshFog = () => {
+      // Demote everything currently-visible back to merely-explored.
+      for (let i = 0; i < fogGrid.length; i++) {
+        if (fogGrid[i] === FOG_VISIBLE) fogGrid[i] = FOG_EXPLORED;
+      }
+      // Stamp a visibility disc around every living friendly entity.
+      for (const ent of sim.entities) {
+        if (ent.state === 'dead' || ent.team !== selfPlayer.team) continue;
+        const r = sightRadius(ent);
+        const r2 = r * r;
+        const minX = Math.max(0, Math.floor(ent.x - r));
+        const maxX = Math.min(gridS - 1, Math.ceil(ent.x + r));
+        const minZ = Math.max(0, Math.floor(ent.z - r));
+        const maxZ = Math.min(gridS - 1, Math.ceil(ent.z + r));
+        for (let cx = minX; cx <= maxX; cx++) {
+          const ddx = cx - ent.x;
+          for (let cz = minZ; cz <= maxZ; cz++) {
+            const ddz = cz - ent.z;
+            if (ddx * ddx + ddz * ddz <= r2) fogGrid[cx * gridS + cz] = FOG_VISIBLE;
+          }
+        }
+      }
+      // Write alpha per texel. Texel (tx,ty) → world (tx, gridS-1-ty) because
+      // the plane's V axis is flipped relative to world Z (see UV derivation).
+      for (let ty = 0; ty < fogTexH; ty++) {
+        const cz = (gridS - 1) - ty;
+        for (let tx = 0; tx < fogTexW; tx++) {
+          const state = fogGrid[tx * gridS + cz];
+          const alpha = state === FOG_VISIBLE ? 0 : state === FOG_EXPLORED ? 130 : 245;
+          fogData[(ty * fogTexW + tx) * 4 + 3] = alpha;
+        }
+      }
+      fogTexture.needsUpdate = true;
+    };
 
     // 5. Visual representations/models of Game Entities mapped by entity ID
     const entityMeshes: Map<string, THREE.Group> = new Map();
@@ -2447,7 +2555,7 @@ export default function RTSGameCanvas({
       // Apply locally instantly
       sim.credits -= cost;
       setCredits(sim.credits);
-      sound.playConstruction();
+      sound.playSpatial('playConstruction', targetX, targetZ);
 
       sim.entities.push({
         id: buildingId,
@@ -2528,7 +2636,7 @@ export default function RTSGameCanvas({
       // Discharge points
       sim.commandCharge = 0;
       setCommandCharge(0);
-      sound.playLaunch();
+      sound.playSpatial('playLaunch', x, z);
 
       // Trigger effects instantly locally
       executeVisualAirstrike(pObj.strikeType, x, z);
@@ -2597,7 +2705,7 @@ export default function RTSGameCanvas({
       beaconLight.position.set(x, baseElev + 6, z);
       scene.add(beaconLight);
 
-      sound.playExplosion();
+      sound.playSpatial('playExplosion', x, z);
 
       // Spawn drifting fire particles
       for (let i = 0; i < 35; i++) {
@@ -2743,7 +2851,7 @@ export default function RTSGameCanvas({
           const act: GameActionEvent = data.action;
 
           if (act.event === 'build') {
-            sound.playConstruction();
+            sound.playSpatial('playConstruction', act.x, act.z);
             const bProps = getBuildingProps(act.buildingType, authorId, sim.players);
             sim.entities.push({
               id: act.id,
@@ -2837,11 +2945,17 @@ export default function RTSGameCanvas({
       if (!mountRef.current) return;
       const w = mountRef.current.clientWidth;
       const h = mountRef.current.clientHeight;
+      if (w === 0 || h === 0) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+    // Entering/leaving fullscreen or rotating fires before layout settles —
+    // recompute on the next frame so clientWidth/Height are final.
+    const deferredResize = () => requestAnimationFrame(() => requestAnimationFrame(handleResize));
     window.addEventListener('resize', handleResize);
+    document.addEventListener('fullscreenchange', deferredResize);
+    window.addEventListener('orientationchange', deferredResize);
 
     // Touch event implementations
     let lastTouchEndTime = 0;
@@ -3036,6 +3150,22 @@ export default function RTSGameCanvas({
       );
       camera.lookAt(new THREE.Vector3(sim.camX, 0, sim.camZ));
 
+      // a2. Move the 3D audio listener to the centre of the current view.
+      // viewRadius scales with zoom (higher camera = more ground visible), so
+      // sounds inside the frame stay loud and those off-screen fade out fast.
+      sound.setListener(sim.camX, sim.camZ, sim.camZoom * 0.95, sim.camRotation);
+
+      // a3. Refresh fog of war a few times a second (not every frame — vision
+      // changes slowly and the grid sweep is the fog's only heavy work).
+      if (tickCount % 12 === 0) {
+        refreshFog();
+        // Neutral scenery & resource rigs only appear once explored.
+        decoGroups.forEach(d => { d.group.visible = isExploredAt(d.x, d.z); });
+        resourceGeoms.forEach(rig => {
+          rig.visible = isExploredAt(rig.position.x, rig.position.z);
+        });
+      }
+
       // b. Sync resource rig visual animations
       resourceGeoms.forEach(rig => {
         const pArm = rig.getObjectByName('pump_arm');
@@ -3133,7 +3263,10 @@ export default function RTSGameCanvas({
           visualY = currentElevation + 0.05;
         }
 
-        mesh.visible = ent.state !== 'garrisoned';
+        // Fog of war: our own forces are always drawn; everyone else only
+        // while a friendly unit currently has eyes on their tile.
+        const fogReveals = ent.team === selfPlayer.team || isVisibleAt(ent.x, ent.z);
+        mesh.visible = ent.state !== 'garrisoned' && fogReveals;
         mesh.position.set(ent.x, visualY, ent.z);
 
         // Mobile Jammer stealth field transparency application
@@ -3648,7 +3781,7 @@ export default function RTSGameCanvas({
                 if (ent.subType === 'drone_kamikaze') {
                   ent.health = 0; // dies upon collision!
                   ent.state = 'dead';
-                  sound.playExplosion();
+                  sound.playSpatial('playExplosion', ent.x, ent.z);
                   // Instant damage for kamikaze
                   victim.health -= props.dps;
                   if (victim.health <= 0) {
@@ -3740,13 +3873,13 @@ export default function RTSGameCanvas({
 
                 const entFaction = getFaction(ent.playerId, sim.players);
                 if (entFaction === 'Alliance') {
-                  sound.playAllianceZap();
+                  sound.playSpatial('playAllianceZap', ent.x, ent.z);
                 } else if (entFaction === 'Coalition') {
-                  sound.playCoalitionBoom();
+                  sound.playSpatial('playCoalitionBoom', ent.x, ent.z);
                 } else if (entFaction === 'Union') {
-                  sound.playUnionTesla();
+                  sound.playSpatial('playUnionTesla', ent.x, ent.z);
                 } else { // Syndicate
-                  sound.playSyndicateAcid();
+                  sound.playSpatial('playSyndicateAcid', ent.x, ent.z);
                 }
               }
             }
@@ -3846,13 +3979,13 @@ export default function RTSGameCanvas({
 
               const turFaction = getFaction(ent.playerId, sim.players);
               if (turFaction === 'Alliance') {
-                sound.playAllianceZap();
+                sound.playSpatial('playAllianceZap', ent.x, ent.z);
               } else if (turFaction === 'Coalition') {
-                sound.playCoalitionBoom();
+                sound.playSpatial('playCoalitionBoom', ent.x, ent.z);
               } else if (turFaction === 'Union') {
-                sound.playUnionTesla();
+                sound.playSpatial('playUnionTesla', ent.x, ent.z);
               } else { // Syndicate
-                sound.playSyndicateAcid();
+                sound.playSpatial('playSyndicateAcid', ent.x, ent.z);
               }
             }
             } // close if (!ent.cooldown
@@ -4000,12 +4133,12 @@ export default function RTSGameCanvas({
              if (targetEnt.health <= 0) {
                 targetEnt.health = 0;
                 targetEnt.state = 'dead';
-                sound.playExplosion();
+                sound.playSpatial('playExplosion', targetEnt.x, targetEnt.z);
                 if (targetEnt.type === 'building') {
                   pushNotification(`Вражеская структура разрушена!`, 'warn');
                 }
              } else if (p.subType === 'rocket' || p.subType === 'shell') {
-                sound.playExplosion(); // smaller explosive thump
+                sound.playSpatial('playExplosion', targetEnt.x, targetEnt.z); // smaller explosive thump
              }
           }
         }
@@ -4428,11 +4561,19 @@ export default function RTSGameCanvas({
       renderer.render(scene, camera);
     };
 
+    // Prime the fog once so the first painted frame already reveals our base
+    // (and hides everything else) instead of flashing fully black.
+    refreshFog();
+    decoGroups.forEach(d => { d.group.visible = isExploredAt(d.x, d.z); });
+    resourceGeoms.forEach(rig => { rig.visible = isExploredAt(rig.position.x, rig.position.z); });
+
     animationId = requestAnimationFrame(gameLoop);
 
     return () => {
       cancelAnimationFrame(animationId);
       window.removeEventListener('resize', handleResize);
+      document.removeEventListener('fullscreenchange', deferredResize);
+      window.removeEventListener('orientationchange', deferredResize);
       canvasDom.removeEventListener('mousedown', handleMouseDown);
       canvasDom.removeEventListener('mousemove', handleMouseMoveSelection);
       canvasDom.removeEventListener('mouseup', handleMouseUp);
@@ -4451,6 +4592,9 @@ export default function RTSGameCanvas({
       beaconMat.dispose();
       selectionRingGeom.dispose();
       selectionRingMat.dispose();
+      fogGeo.dispose();
+      fogMat.dispose();
+      fogTexture.dispose();
     };
   }, [lobby, isSingleplayer, aiOpponents]);
 
@@ -4570,7 +4714,7 @@ export default function RTSGameCanvas({
   const isContextActive = hasSelectedBuilder || hasSelectedCC || hasSelectedBarracks || hasSelectedWarFactory;
 
   return (
-    <div className="h-screen w-screen bg-[#070b0e] text-slate-100 flex flex-col relative select-none font-sans overflow-hidden">
+    <div className="h-[100dvh] w-screen bg-[#070b0e] text-slate-100 flex flex-col relative select-none font-sans overflow-hidden">
       {/* 3D Viewport container */}
       <div ref={mountRef} className="flex-1 w-full h-full cursor-crosshair relative" />
 
@@ -4615,10 +4759,11 @@ export default function RTSGameCanvas({
           </div>
         </div>
 
-        {/* Quick Back arrow */}
+        {/* Quick exit — offset left so it never hides behind the global
+            fullscreen + sound controls pinned at the top-right corner. */}
         <button
           onClick={onExitGame}
-          className="ui-btn ui-btn-ghost clip-bevel-sm px-3.5 py-2.5 text-xs uppercase tracking-wide pointer-events-auto"
+          className="ui-btn ui-btn-ghost clip-bevel-sm px-3.5 py-2.5 text-xs uppercase tracking-wide pointer-events-auto mr-[104px]"
         >
           <LogOut className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Выйти</span>
         </button>
@@ -4677,8 +4822,10 @@ export default function RTSGameCanvas({
               backgroundSize: '16px 16px'
             }}
           >
-            {/* Symmetrical Starting bases overlayed on mini viewport */}
-            {simulationRef.current.map?.resourceSpots.map((spot, idx) => (
+            {/* Symmetrical Starting bases overlayed on mini viewport (only once explored) */}
+            {simulationRef.current.map?.resourceSpots
+              .filter(spot => !fogQueryRef.current || fogQueryRef.current.explored(spot.x, spot.z))
+              .map((spot, idx) => (
               <div
                 key={idx}
                 className="absolute w-2 h-2 bg-yellow-500 rounded-full border border-black animate-pulse"
@@ -4706,6 +4853,11 @@ export default function RTSGameCanvas({
               );
 
               if (isTargetCloaked && !isFriendly) return null;
+
+              // Fog of war on the radar: enemies/neutrals only show where we
+              // currently have vision (own forces are always tracked).
+              const isOwnTeam = ent.team === selfPlayer.team;
+              if (!isOwnTeam && fogQueryRef.current && !fogQueryRef.current.visible(ent.x, ent.z)) return null;
 
               return (
                 <div
@@ -4808,7 +4960,7 @@ export default function RTSGameCanvas({
                         disabled={!canAfford}
                         className={`prod-btn ${active ? 'is-active' : ''}`}
                       >
-                        <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
+                        <span className="text-[10px] font-bold uppercase truncate w-full">{getBuildingShortName(key)}</span>
                         <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
                       </button>
                     );
@@ -4837,7 +4989,7 @@ export default function RTSGameCanvas({
                         disabled={!canAfford}
                         className="prod-btn"
                       >
-                        <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
+                        <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
                         <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
                       </button>
                     );
@@ -4866,7 +5018,7 @@ export default function RTSGameCanvas({
                         disabled={!canAfford}
                         className="prod-btn"
                       >
-                        <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
+                        <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
                         <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
                       </button>
                     );
@@ -4895,7 +5047,7 @@ export default function RTSGameCanvas({
                         disabled={!canAfford}
                         className="prod-btn"
                       >
-                        <span className="text-[10px] font-bold uppercase truncate w-full">{prop.name}</span>
+                        <span className="text-[10px] font-bold uppercase truncate w-full">{getUnitShortName(key)}</span>
                         <span className="text-[9px] font-mono font-bold text-emerald-400 mt-0.5">${prop.cost}</span>
                       </button>
                     );

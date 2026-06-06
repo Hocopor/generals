@@ -5,6 +5,88 @@ class RTSAudioEngine {
   private ctx: AudioContext | null = null;
   private enabled = true;
 
+  // Master bus — every SFX and the BGM route through this so positional
+  // sounds, muting and future volume control all share one output.
+  private master: GainNode | null = null;
+
+  // Listener = centre of the player's current view (camera target).
+  // Updated every frame from the game loop via setListener().
+  private listenerX = 0;
+  private listenerZ = 0;
+  private listenerRot = 0;     // camera yaw, so stereo pan follows the screen
+  private viewRadius = 30;     // world units roughly covering the visible area
+
+  // While set, freshly-built SFX route here (a per-call spatial node) instead
+  // of straight to the master bus. Safe because each play* method builds its
+  // graph synchronously before this is cleared.
+  private routeOverride: AudioNode | null = null;
+
+  /** Output node any SFX should connect to. */
+  private out(): AudioNode {
+    return this.routeOverride ?? this.master ?? this.ctx!.destination;
+  }
+
+  /** Update the audio listener to the centre of the player's view. */
+  setListener(x: number, z: number, viewRadius: number, rotation: number) {
+    this.listenerX = x;
+    this.listenerZ = z;
+    this.viewRadius = viewRadius > 1 ? viewRadius : 30;
+    this.listenerRot = rotation;
+  }
+
+  /**
+   * Build the per-call spatial chain (distance gain + stereo pan) for a world
+   * position, or return null if it would be inaudible (so we can skip
+   * synthesising far-off-screen sounds entirely — a real perf win).
+   *
+   * Falloff: full inside the view, only slightly quieter toward the edge,
+   * then a short tail just beyond the view that drops to silence fast.
+   */
+  private spatialInput(x: number, z: number): GainNode | null {
+    const ctx = this.ctx!;
+    if (!this.master) return null;
+    const dx = x - this.listenerX;
+    const dz = z - this.listenerZ;
+    const dist = Math.hypot(dx, dz);
+    const r = this.viewRadius;
+
+    let g: number;
+    if (dist <= r) {
+      g = 1 - 0.4 * (dist / r);                      // 1.0 centre → 0.6 at view edge
+    } else {
+      g = 0.6 * Math.max(0, 1 - (dist - r) / (r * 0.5)); // edge → 0 by 1.5×radius
+    }
+    if (g < 0.02) return null;                       // inaudible, skip entirely
+
+    const gain = ctx.createGain();
+    gain.gain.value = g;
+    const panner = ctx.createStereoPanner();
+    // Pan by the screen-right component of the offset (camera-rotation aware).
+    const cos = Math.cos(this.listenerRot);
+    const sin = Math.sin(this.listenerRot);
+    panner.pan.value = Math.max(-1, Math.min(1, (dx * cos - dz * sin) / r));
+    gain.connect(panner).connect(this.master);
+    return gain;
+  }
+
+  /**
+   * Play one of the SFX methods anchored to a world position.
+   * Usage: sound.playSpatial('playExplosion', x, z)
+   */
+  playSpatial(method: 'playExplosion' | 'playGunshot' | 'playLaser' | 'playAllianceZap' | 'playCoalitionBoom' | 'playUnionTesla' | 'playSyndicateAcid' | 'playConstruction' | 'playLaunch', x: number, z: number) {
+    if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+    const node = this.spatialInput(x, z);
+    if (!node) return;            // inaudible → don't even synthesise
+    this.routeOverride = node;
+    try {
+      (this[method] as () => void)();
+    } finally {
+      this.routeOverride = null;
+    }
+  }
+
   private bgmGain: GainNode | null = null;
   private bgmOscillators: OscillatorNode[] = [];
   
@@ -30,6 +112,13 @@ class RTSAudioEngine {
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
+    if (!this.master) {
+      // Master bus: all SFX route here (directly, or via a per-call spatial
+      // node) so the whole mix shares one output and can be scaled later.
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 1.0;
+      this.master.connect(this.ctx.destination);
+    }
     if (this.ctx.state === 'suspended') {
       this.ctx.resume();
     }
@@ -52,7 +141,7 @@ class RTSAudioEngine {
     
     this.bgmGain = ctx.createGain();
     this.bgmGain.gain.value = 0.5; // Main bus volume
-    this.bgmGain.connect(ctx.destination);
+    this.bgmGain.connect(this.out());
     
     // Atmospheric dark drone (persistent background pad)
     const drone = ctx.createOscillator();
@@ -263,7 +352,7 @@ class RTSAudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.out());
     osc.start();
     osc.stop(ctx.currentTime + 0.05);
   }
@@ -286,7 +375,7 @@ class RTSAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.05);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.out());
       osc.start(ctx.currentTime + offset);
       osc.stop(ctx.currentTime + offset + 0.05);
     });
@@ -308,7 +397,7 @@ class RTSAudioEngine {
     gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.5);
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.out());
     osc.start();
     osc.stop(ctx.currentTime + 0.5);
     
@@ -323,7 +412,7 @@ class RTSAudioEngine {
     pingGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
     
     ping.connect(pingGain);
-    pingGain.connect(ctx.destination);
+    pingGain.connect(this.out());
     ping.start();
     ping.stop(ctx.currentTime + 0.2);
   }
@@ -346,7 +435,7 @@ class RTSAudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.out());
     osc.start();
     osc.stop(ctx.currentTime + 0.05);
   }
@@ -374,7 +463,7 @@ class RTSAudioEngine {
 
       osc.connect(filter);
       filter.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.out());
       osc.start(ctx.currentTime + idx * 0.1);
       osc.stop(ctx.currentTime + idx * 0.1 + 0.15);
     });
@@ -395,7 +484,7 @@ class RTSAudioEngine {
     subGain.gain.setValueAtTime(1.0, ctx.currentTime);
     subGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
     subOsc.connect(subGain);
-    subGain.connect(ctx.destination);
+    subGain.connect(this.out());
     subOsc.start();
     subOsc.stop(ctx.currentTime + 0.8);
 
@@ -422,7 +511,7 @@ class RTSAudioEngine {
 
     noise.connect(filter);
     filter.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
+    noiseGain.connect(this.out());
 
     noise.start();
     noise.stop(ctx.currentTime + 0.8);
@@ -457,7 +546,7 @@ class RTSAudioEngine {
 
     osc1.connect(gain);
     osc2.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.out());
     
     osc1.start();
     osc2.start();
@@ -493,7 +582,7 @@ class RTSAudioEngine {
     
     noise.connect(filter);
     filter.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.out());
     
     // Low thump for the barrel explosion
     const thump = ctx.createOscillator();
@@ -506,7 +595,7 @@ class RTSAudioEngine {
     thumpGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
     
     thump.connect(thumpGain);
-    thumpGain.connect(ctx.destination);
+    thumpGain.connect(this.out());
 
     noise.start();
     noise.stop(ctx.currentTime + 0.15);
@@ -549,7 +638,7 @@ class RTSAudioEngine {
     osc1.connect(filter);
     osc2.connect(filter);
     filter.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.out());
     
     osc1.start();
     osc2.start();
@@ -585,7 +674,7 @@ class RTSAudioEngine {
     
     noise.connect(noiseFilter);
     noiseFilter.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
+    noiseGain.connect(this.out());
     
     noise.start();
     noise.stop(ctx.currentTime + 0.5);
@@ -601,7 +690,7 @@ class RTSAudioEngine {
     thumpGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
     
     thump.connect(thumpGain);
-    thumpGain.connect(ctx.destination);
+    thumpGain.connect(this.out());
     thump.start();
     thump.stop(ctx.currentTime + 0.1);
   }
@@ -621,7 +710,7 @@ class RTSAudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
     
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.out());
     osc.start();
     osc.stop(ctx.currentTime + 0.1);
   }
@@ -644,7 +733,7 @@ class RTSAudioEngine {
     subGain.gain.setValueAtTime(0.6, ctx.currentTime);
     subGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
     
-    sub.connect(filter).connect(subGain).connect(ctx.destination);
+    sub.connect(filter).connect(subGain).connect(this.out());
     sub.start();
     sub.stop(ctx.currentTime + 0.22);
   }
@@ -666,7 +755,7 @@ class RTSAudioEngine {
       gain.gain.setValueAtTime(0.15, ctx.currentTime + offset);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.05);
       
-      osc.connect(gain).connect(ctx.destination);
+      osc.connect(gain).connect(this.out());
       osc.start(ctx.currentTime + offset);
       osc.stop(ctx.currentTime + offset + 0.05);
     }
@@ -696,7 +785,7 @@ class RTSAudioEngine {
     gain.gain.setValueAtTime(0.4, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
     
-    noise.connect(filter).connect(gain).connect(ctx.destination);
+    noise.connect(filter).connect(gain).connect(this.out());
     noise.start();
     noise.stop(ctx.currentTime + 0.15);
   }

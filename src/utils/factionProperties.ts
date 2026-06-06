@@ -18,6 +18,38 @@ export interface FactionBuildingProp {
   desc: string;
 }
 
+// Short, faction-agnostic labels for the compact HUD build buttons.
+// The full faction-specific name + description appear in the hover tooltip.
+const UNIT_SHORT_NAMES: Record<UnitType, string> = {
+  builder: 'Строитель',
+  harvester: 'Сборщик',
+  drone_scout: 'Разведчик',
+  drone_kamikaze: 'Камикадзе',
+  cyber_specops: 'Пехота',
+  precision_tank: 'Танк',
+  artillery_mlrs: 'Артиллерия',
+  mobile_jammer: 'РЭБ'
+};
+
+const BUILDING_SHORT_NAMES: Record<BuildingType, string> = {
+  command_center: 'Штаб',
+  power_plant: 'Энергия',
+  supply_refinery: 'НПЗ',
+  oil_derrick: 'Вышка',
+  barracks: 'Казарма',
+  war_factory: 'Завод',
+  defense_turret: 'Турель',
+  civilian_building: 'Гарнизон'
+};
+
+export function getUnitShortName(unitType: UnitType): string {
+  return UNIT_SHORT_NAMES[unitType] || unitType;
+}
+
+export function getBuildingShortName(bType: BuildingType): string {
+  return BUILDING_SHORT_NAMES[bType] || bType;
+}
+
 export function getFactionUnitProperties(unitType: UnitType, faction: Faction): FactionUnitProp {
   let name = '';
   let hp = 100;
