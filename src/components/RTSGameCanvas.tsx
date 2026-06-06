@@ -3111,6 +3111,15 @@ export default function RTSGameCanvas({
                   setTimeout(() => { beaconMesh.visible = false; }, 850);
                   setIsMenuCollapsed(true);
                 }
+              } else {
+                // Nothing selected and no active mode: a single tap on one of our
+                // own units or buildings selects it (so opening the build menu on
+                // a phone is just one tap, not a double-tap).
+                const tapped = findEntityAt(pt.x, pt.z, 2.5);
+                if (tapped && tapped.playerId === playerId) {
+                  sim.selectedIds = [tapped.id];
+                  sound.playSelect();
+                }
               }
             }
           }
@@ -3137,6 +3146,136 @@ export default function RTSGameCanvas({
 
     // AI simulation scheduler runs once every ~3 seconds offline
     let lastAiTick = 0;
+
+    // Reusable weapon discharge. Spawns the correct projectile (or detonates a
+    // kamikaze drone) at `victim`, applies the unit's reload cooldown and plays
+    // the faction firing sound. Caller guarantees: victim alive, target within
+    // weapon range, cooldown ready, the firing unit is not jammed and actually
+    // carries a weapon. Used both when a unit is statically attacking AND when
+    // it fires opportunistically while driving to a move order.
+    const fireUnitWeapon = (ent: GameEntity, victim: GameEntity, mesh: THREE.Object3D, dist: number) => {
+      const props = getUnitProps(ent.subType as UnitType, ent.playerId, sim.players);
+      const angleVal = Math.atan2(victim.z - ent.z, victim.x - ent.x);
+      ent.cooldown = 45; // default reload, overridden per chassis below
+
+      if (ent.subType === 'drone_kamikaze') {
+        ent.health = 0; // dies upon collision!
+        ent.state = 'dead';
+        sound.playSpatial('playExplosion', ent.x, ent.z);
+        victim.health -= props.dps;
+        if (victim.health <= 0) {
+          victim.health = 0;
+          victim.state = 'dead';
+          pushNotification(`Meltdown on targeted enemy structural frame!`, 'warn');
+        }
+        return;
+      }
+
+      const owner = sim.players.find(p => p.id === ent.playerId) || selfPlayer;
+      let pType: 'machinegun' | 'shell' | 'rocket' | 'laser' = 'machinegun';
+      let pColor = owner.color;
+      let pSpeed = 0.5;
+
+      if (ent.subType === 'precision_tank') {
+        pType = 'shell';
+        pColor = '#f59e0b';
+        pSpeed = 0.8;
+      } else if (ent.subType === 'artillery_mlrs') {
+        pType = 'rocket';
+        pColor = '#eab308';
+        pSpeed = 0.3;
+        ent.cooldown = 65;
+      } else if (ent.subType === 'cyber_specops' || ent.subType === 'drone_scout') {
+        pType = 'machinegun';
+        pColor = '#38bdf8';
+        pSpeed = 0.75;
+        ent.cooldown = 15;
+      }
+
+      const pMesh = new THREE.Object3D();
+      if (pType === 'shell') {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.4, 4), new THREE.MeshBasicMaterial({ color: pColor }));
+        m.rotation.x = Math.PI / 2;
+        pMesh.add(m);
+      } else if (pType === 'rocket') {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.6, 6), new THREE.MeshStandardMaterial({ color: '#4b5563' }));
+        m.rotation.x = Math.PI / 2;
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.2, 6), new THREE.MeshStandardMaterial({ color: '#f59e0b' }));
+        tip.position.z = 0.4;
+        tip.rotation.x = Math.PI / 2;
+        const fire = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.01, 0.3, 4), new THREE.MeshBasicMaterial({ color: pColor }));
+        fire.position.z = -0.4;
+        fire.rotation.x = Math.PI / 2;
+        pMesh.add(m);
+        pMesh.add(tip);
+        pMesh.add(fire);
+      } else {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.4), new THREE.MeshBasicMaterial({ color: pColor }));
+        pMesh.add(m);
+      }
+
+      const startHeight = mesh.position.y + (ent.subType === 'precision_tank' ? 0.3 : 0.1);
+
+      const flash = new THREE.Mesh(new THREE.SphereGeometry(Math.random()*0.15 + 0.1, 4, 4), new THREE.MeshBasicMaterial({ color: pColor }));
+      flash.position.set(ent.x + Math.cos(angleVal)*0.5, startHeight, ent.z + Math.sin(angleVal)*0.5);
+      scene.add(flash);
+      explosionParticles.push({ mesh: flash, stepY: 0, life: 0.1, sizeShrink: 0.8 });
+
+      pMesh.position.set(ent.x, startHeight, ent.z);
+      pMesh.lookAt(victim.x, startHeight, victim.z);
+      scene.add(pMesh);
+
+      activeProjectiles.push({
+        mesh: pMesh,
+        targetId: victim.id,
+        damage: pType === 'machinegun' ? props.dps / (45/15) : (pType === 'rocket' ? props.dps * 1.5 : props.dps),
+        speed: pSpeed,
+        subType: pType,
+        x: ent.x,
+        y: startHeight,
+        z: ent.z,
+        color: pColor,
+        life: 0,
+        startX: ent.x,
+        startZ: ent.z,
+        distanceTotal: dist,
+        ownerId: owner.id
+      });
+
+      const entFaction = getFaction(ent.playerId, sim.players);
+      if (entFaction === 'Alliance') sound.playSpatial('playAllianceZap', ent.x, ent.z);
+      else if (entFaction === 'Coalition') sound.playSpatial('playCoalitionBoom', ent.x, ent.z);
+      else if (entFaction === 'Union') sound.playSpatial('playUnionTesla', ent.x, ent.z);
+      else sound.playSpatial('playSyndicateAcid', ent.x, ent.z);
+    };
+
+    // True when the unit has an offensive weapon (builders / jammers / harvesters
+    // carry none, so they must never auto-engage or stop to "fire").
+    const hasWeapon = (ent: GameEntity): boolean => {
+      const p = getUnitProps(ent.subType as UnitType, ent.playerId, sim.players);
+      return p.range > 0 && p.dps > 0;
+    };
+
+    // Finds the closest hostile to `ent` within `radius` world units (respects
+    // Mobile Jammer cloaking just like the manual/idle target acquisition).
+    const findHostileInRange = (ent: GameEntity, radius: number): GameEntity | null => {
+      let best: GameEntity | null = null;
+      let bestDist = radius;
+      for (const v of sim.entities) {
+        if (v.state === 'dead' || v.team === ent.team) continue;
+        const dx = v.x - ent.x, dz = v.z - ent.z;
+        const d = Math.sqrt(dx*dx + dz*dz);
+        if (d >= bestDist) continue;
+        const isTargetCloaked = v.type === 'unit' && v.subType !== 'mobile_jammer' && sim.entities.some(j =>
+          j.state !== 'dead' && j.subType === 'mobile_jammer' && j.playerId === v.playerId &&
+          Math.sqrt((j.x - v.x)*(j.x - v.x) + (j.z - v.z)*(j.z - v.z)) < 8.0
+        );
+        if (isTargetCloaked && d > 2.8) continue;
+        bestDist = d;
+        best = v;
+      }
+      return best;
+    };
 
     const gameLoop = () => {
       animationId = requestAnimationFrame(gameLoop);
@@ -3398,8 +3537,12 @@ export default function RTSGameCanvas({
             const angleToBuild = Math.atan2(ent.x - nearBuilder.x, ent.z - nearBuilder.z);
             nearBuilder.angle = angleToBuild;
 
-            // Spawn visual welding sparks at construction site
-            if (Math.random() < 0.45) {
+            // Spawn visual welding sparks at construction site — but only where
+            // we actually have vision, so an enemy base being raised inside the
+            // fog of war stays completely hidden (sparks live in the scene, not
+            // under the building's fog-gated mesh, so they must be gated here).
+            const constructionVisible = ent.team === selfPlayer.team || isVisibleAt(ent.x, ent.z);
+            if (constructionVisible && Math.random() < 0.45) {
               const sparkMaterial = new THREE.MeshBasicMaterial({ color: '#22d3ee', transparent: true, opacity: 0.9 });
               const sparkMesh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 4, 4), sparkMaterial);
               sparkMesh.position.set(
@@ -3424,8 +3567,12 @@ export default function RTSGameCanvas({
           if (ent.buildProgress >= 1.0) {
             ent.buildProgress = 1.0;
             ent.state = 'idle';
-            sound.playBuildComplete();
-            pushNotification(`Строительство завершено успешно: ${BUILDING_PROPERTIES[ent.subType as BuildingType]?.name || ent.subType}`, 'success');
+            // Only announce our OWN construction — an enemy finishing a structure
+            // in the fog must not leak its presence via chime or alert.
+            if (ent.playerId === playerId) {
+              sound.playBuildComplete();
+              pushNotification(`Строительство завершено успешно: ${BUILDING_PROPERTIES[ent.subType as BuildingType]?.name || ent.subType}`, 'success');
+            }
           }
         }
 
@@ -3679,7 +3826,30 @@ export default function RTSGameCanvas({
             }
           }
 
-          if (dist > dynamicStopRadius) {
+          // Opportunistic combat while travelling. A hostile that wanders into
+          // weapon range is engaged on the way: the human player's own columns
+          // keep rolling to the ordered destination and fire on the move, while
+          // AI / enemy columns HALT to hammer the blocker and resume the march
+          // once it is destroyed (state stays 'moving', so travel auto-resumes).
+          const weaponRange = getUnitProps(ent.subType as UnitType, ent.playerId, sim.players).range;
+          const foe = hasWeapon(ent) ? findHostileInRange(ent, weaponRange) : null;
+          const isHumanOwned = ent.playerId === playerId;
+
+          if (foe) {
+            const fAng = Math.atan2(foe.z - ent.z, foe.x - ent.x);
+            if (!isHumanOwned) {
+              // Turn the whole chassis to face the target it has stopped for.
+              ent.angle = -fAng + Math.PI / 2;
+              mesh.rotation.y = ent.angle;
+            }
+            if (!ent.cooldown || ent.cooldown <= 0) {
+              fireUnitWeapon(ent, foe, mesh, Math.sqrt((foe.x - ent.x) * (foe.x - ent.x) + (foe.z - ent.z) * (foe.z - ent.z)));
+            }
+          }
+
+          const holdToFight = !!foe && !isHumanOwned;
+
+          if (!holdToFight && dist > dynamicStopRadius) {
             // Apply step toward target
             const angleVal = Math.atan2(dz, dx);
             ent.angle = -angleVal + Math.PI / 2; // rotating mesh face
@@ -3694,7 +3864,7 @@ export default function RTSGameCanvas({
             // Scout drones fly high
             const visualHeight = ent.subType.includes('drone') ? 3.0 : targetElevation + 0.08;
             mesh.position.set(ent.x, visualHeight, ent.z);
-          } else {
+          } else if (!holdToFight) {
             ent.state = 'idle';
           }
         }
@@ -3733,6 +3903,22 @@ export default function RTSGameCanvas({
         }
 
         if (ent.type === 'unit' && ent.state === 'attacking' && ent.targetId !== undefined) {
+          // Opportunistic retarget for AI columns: if the assigned objective is
+          // out of weapon range but a hostile is already within firing range,
+          // destroy that blocker first instead of marching past it. The human's
+          // own units always pursue the exact target the player ordered.
+          if (ent.playerId !== playerId && hasWeapon(ent)) {
+            const wr = getUnitProps(ent.subType as UnitType, ent.playerId, sim.players).range;
+            const cur = sim.entities.find(e => e.id === ent.targetId);
+            const curDist = cur ? Math.sqrt((cur.x - ent.x) * (cur.x - ent.x) + (cur.z - ent.z) * (cur.z - ent.z)) : Infinity;
+            if (!cur || cur.state === 'dead' || curDist > wr) {
+              const closer = findHostileInRange(ent, wr);
+              if (closer && closer.id !== ent.targetId) {
+                ent.targetId = closer.id;
+                ent.targetType = closer.type;
+              }
+            }
+          }
           const victim = sim.entities.find(e => e.id === ent.targetId);
           if (!victim || victim.state === 'dead') {
             ent.state = 'idle';
@@ -3776,111 +3962,7 @@ export default function RTSGameCanvas({
                 scene.add(spar);
                 explosionParticles.push({ mesh: spar, stepY: 0.05, life: 0.15, sizeShrink: 0.85 });
               } else if (!ent.cooldown || ent.cooldown <= 0) {
-                ent.cooldown = 45; // default loop rate limit
-
-                if (ent.subType === 'drone_kamikaze') {
-                  ent.health = 0; // dies upon collision!
-                  ent.state = 'dead';
-                  sound.playSpatial('playExplosion', ent.x, ent.z);
-                  // Instant damage for kamikaze
-                  victim.health -= props.dps;
-                  if (victim.health <= 0) {
-                    victim.health = 0;
-                    victim.state = 'dead';
-                    pushNotification(`Meltdown on targeted enemy structural frame!`, 'warn');
-                  }
-                  return; // skips projectile creation
-                }
-
-                // Determine projectile visual and properties based on unit subtype
-                const owner = sim.players.find(p => p.id === ent.playerId) || selfPlayer;
-                let pType: 'machinegun' | 'shell' | 'rocket' | 'laser' = 'machinegun';
-                let pColor = owner.color;
-                let pSpeed = 0.5;
-
-                if (ent.subType === 'precision_tank') {
-                  pType = 'shell';
-                  pColor = '#f59e0b'; // orange shell
-                  pSpeed = 0.8;
-                } else if (ent.subType === 'artillery_mlrs') {
-                  pType = 'rocket';
-                  pColor = '#eab308'; // rocket fire
-                  pSpeed = 0.3;
-                  ent.cooldown = 65; // slow reload
-                } else if (ent.subType === 'cyber_specops' || ent.subType === 'drone_scout') {
-                  pType = 'machinegun';
-                  pColor = '#38bdf8'; // blueish tracers
-                  pSpeed = 0.75;
-                  ent.cooldown = 15; // fast fire
-                }
-
-                // Create mesh
-                const pMesh = new THREE.Object3D();
-                if (pType === 'shell') {
-                  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.4, 4), new THREE.MeshBasicMaterial({ color: pColor }));
-                  m.rotation.x = Math.PI / 2;
-                  pMesh.add(m);
-                } else if (pType === 'rocket') {
-                  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.6, 6), new THREE.MeshStandardMaterial({ color: '#4b5563' }));
-                  m.rotation.x = Math.PI / 2;
-
-                  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.2, 6), new THREE.MeshStandardMaterial({ color: '#f59e0b' }));
-                  tip.position.z = 0.4;
-                  tip.rotation.x = Math.PI / 2;
-
-                  const fire = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.01, 0.3, 4), new THREE.MeshBasicMaterial({ color: pColor }));
-                  fire.position.z = -0.4;
-                  fire.rotation.x = Math.PI / 2;
-
-                  pMesh.add(m);
-                  pMesh.add(tip);
-                  pMesh.add(fire);
-                } else {
-                  // machinegun
-                  const m = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.4), new THREE.MeshBasicMaterial({ color: pColor }));
-                  pMesh.add(m);
-                }
-
-                const startHeight = mesh.position.y + (ent.subType === 'precision_tank' ? 0.3 : 0.1);
-                
-                // Muzzle flash particle
-                const flash = new THREE.Mesh(new THREE.SphereGeometry(Math.random()*0.15 + 0.1, 4, 4), new THREE.MeshBasicMaterial({color: pColor}));
-                flash.position.set(ent.x + Math.cos(angleVal)*0.5, startHeight, ent.z + Math.sin(angleVal)*0.5);
-                scene.add(flash);
-                explosionParticles.push({ mesh: flash, stepY: 0, life: 0.1, sizeShrink: 0.8 });
-
-                pMesh.position.set(ent.x, startHeight, ent.z);
-                // Look at target initially in flat 2D
-                pMesh.lookAt(victim.x, startHeight, victim.z);
-                scene.add(pMesh);
-
-                activeProjectiles.push({
-                  mesh: pMesh,
-                  targetId: victim.id,
-                  damage: pType === 'machinegun' ? props.dps / (45/15) : (pType === 'rocket' ? props.dps * 1.5 : props.dps),
-                  speed: pSpeed,
-                  subType: pType,
-                  x: ent.x,
-                  y: startHeight,
-                  z: ent.z,
-                  color: pColor,
-                  life: 0,
-                  startX: ent.x,
-                  startZ: ent.z,
-                  distanceTotal: dist,
-                  ownerId: owner.id
-                });
-
-                const entFaction = getFaction(ent.playerId, sim.players);
-                if (entFaction === 'Alliance') {
-                  sound.playSpatial('playAllianceZap', ent.x, ent.z);
-                } else if (entFaction === 'Coalition') {
-                  sound.playSpatial('playCoalitionBoom', ent.x, ent.z);
-                } else if (entFaction === 'Union') {
-                  sound.playSpatial('playUnionTesla', ent.x, ent.z);
-                } else { // Syndicate
-                  sound.playSpatial('playSyndicateAcid', ent.x, ent.z);
-                }
+                fireUnitWeapon(ent, victim, mesh, dist);
               }
             }
           }
@@ -4187,7 +4269,7 @@ export default function RTSGameCanvas({
               angle: Math.PI,
               state: 'idle'
             });
-            pushNotification(`Генерал ИИ подготовил новый инженерно-строительный комплекс!`, 'info');
+            // (No alert — enemy production must stay hidden until actually scouted.)
             aliveBuilders = sim.entities.filter(e => e.playerId === p.id && e.subType === 'builder' && e.state !== 'dead');
           }
 
@@ -4243,7 +4325,6 @@ export default function RTSGameCanvas({
                 state: 'constructing', // Nice rise animated build!
                 buildProgress: 0.05
               });
-              pushNotification(`Зафиксирована тепловая сигнатура постройки противника!`, 'info');
               taskAiBuilders(p.id, bx, bz);
             }
 
@@ -4351,7 +4432,6 @@ export default function RTSGameCanvas({
                 state: 'constructing',
                 buildProgress: 0.05
               });
-              pushNotification(`Генерал ИИ разворачивает защитную турель для охраны периметра!`, 'info');
               taskAiBuilders(p.id, bx, bz);
             }
 
@@ -4788,7 +4868,7 @@ export default function RTSGameCanvas({
       </div>
 
       {/* Modern Bottom Horizontal HUD Command Panel containing minimap, tactical superweapon, and dynamic assembly yards */}
-      <div className={`absolute left-4 right-4 bottom-4 h-auto md:h-[224px] ui-panel ui-railed p-4 flex flex-col md:flex-row gap-5 z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-y-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
+      <div className={`absolute left-2 right-2 bottom-2 md:left-4 md:right-4 md:bottom-4 max-h-[46vh] md:max-h-none h-auto md:h-[224px] ui-panel ui-railed p-2 md:p-4 flex flex-row gap-2 md:gap-5 z-20 transition-all duration-300 ease-in-out ${isMenuCollapsed ? 'translate-y-[calc(100%-12px)] opacity-40 hover:opacity-100' : ''}`}>
 
         {/* Toggle Collapse handle anchored on top border of panel */}
         <button
@@ -4804,19 +4884,19 @@ export default function RTSGameCanvas({
         </button>
 
         {/* 1. Left Section: Radar Minimap with colored indicator targets */}
-        <div className="w-full md:w-44 select-none shrink-0 flex flex-col justify-between">
-          <div className="flex justify-between items-center mb-1.5">
+        <div className="w-24 md:w-44 select-none shrink-0 flex flex-col justify-between">
+          <div className="flex justify-between items-center mb-1 md:mb-1.5">
             <h3 className="text-[10px] font-semibold tracking-[0.12em] text-slate-400 uppercase flex items-center gap-1.5">
-              <Radar className="w-3.5 h-3.5 text-cyan-400" /> Радар
+              <Radar className="w-3.5 h-3.5 text-cyan-400" /> <span className="hidden md:inline">Радар</span>
             </h3>
-            <span className="text-[9px] text-emerald-300 font-semibold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/25 uppercase tracking-wider flex items-center gap-1">
+            <span className="text-[9px] text-emerald-300 font-semibold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/25 uppercase tracking-wider hidden md:flex items-center gap-1">
               <span className="w-1 h-1 rounded-full bg-emerald-400" /> онлайн
             </span>
           </div>
 
           <div
             onClick={handleMinimapClick}
-            className="w-40 h-40 md:w-[164px] md:h-[164px] bg-[#0b1016] border border-slate-800 rounded-lg relative overflow-hidden cursor-crosshair shadow-inner mx-auto md:mx-0"
+            className="w-24 h-24 md:w-[164px] md:h-[164px] bg-[#0b1016] border border-slate-800 rounded-lg relative overflow-hidden cursor-crosshair shadow-inner mx-auto md:mx-0"
             style={{
               backgroundImage: `radial-gradient(circle at center, rgba(8, 145, 178, 0.1) 1px, transparent 1px)`,
               backgroundSize: '16px 16px'
@@ -4898,7 +4978,7 @@ export default function RTSGameCanvas({
         </div>
 
         {/* 2. Center Section: Command Power Charges */}
-        <div className="w-full md:w-64 flex flex-col justify-center border-t md:border-t-0 md:border-l md:border-r border-slate-800/80 pt-3 md:pt-0 md:px-5 shrink-0">
+        <div className="w-36 md:w-64 flex flex-col justify-center border-l border-r border-slate-800/80 px-2 md:px-5 shrink-0">
           <div className="mb-2 flex items-center gap-2">
             <Target className={`w-4 h-4 shrink-0 ${commandCharge >= 100 ? 'text-cyan-400' : 'text-slate-500'}`} />
             <div className="min-w-0">
@@ -4936,7 +5016,7 @@ export default function RTSGameCanvas({
         </div>
 
         {/* 3. Right Section: Structure Deployers / Factories recruiters */}
-        <div className="flex-1 flex flex-col justify-center overflow-x-auto min-w-0">
+        <div className="flex-1 flex flex-col justify-center overflow-y-auto overflow-x-hidden min-w-0">
           <div className="w-full h-full flex flex-col justify-center">
             
             {/* Context: Builder selected */}
@@ -5106,30 +5186,25 @@ export default function RTSGameCanvas({
 
 
 
-      {/* Mobile-tailored Touch Actions Dashboard (bottom floating, only shown if on mobile) */}
+      {/* Mobile-tailored Touch Actions Dashboard — pinned to the top centre so it
+          never collides with the bottom command panel (which now fits on screen). */}
       {isMobile && (
-        <div className="absolute bottom-6 left-4 right-4 md:left-auto md:right-96 flex flex-col items-center pointer-events-none z-30 animate-fade-in">
+        <div className="absolute top-[58px] left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 pointer-events-none z-30 animate-fade-in max-w-[94vw]">
           {/* Active Help Bar */}
-          <div className="bg-slate-950/90 text-cyan-400 border border-cyan-500/30 text-[10px] uppercase font-mono px-3 py-1 rounded-full mb-2 shadow-lg backdrop-blur shadow-black/60">
+          <div className="bg-slate-950/90 text-cyan-400 border border-cyan-500/30 text-[10px] uppercase font-mono px-3 py-1 rounded-full shadow-lg backdrop-blur shadow-black/60 text-center">
             {buildingToPlace ? (
-              <span className="text-yellow-400 animate-pulse">● РЕЖИМ СТРОИТЕЛЬСТВА — Тапните по карте</span>
+              <span className="text-yellow-400 animate-pulse">● СТРОИТЕЛЬСТВО — Тапните по карте</span>
             ) : commandStrikeActive ? (
-              <span className="text-rose-400 animate-pulse">● УДАР СУПЕРОРУЖИЕМ — Выберите координаты</span>
+              <span className="text-rose-400 animate-pulse">● УДАР — Выберите координаты</span>
             ) : selectedEntityIds.length > 0 ? (
-              <span className="text-emerald-400 font-bold">● ВЫБРАНО: {selectedEntityIds.length} ЕД. — Тап для Движения/Атаки</span>
+              <span className="text-emerald-400 font-bold">● ВЫБРАНО: {selectedEntityIds.length} — Тап: Движение/Атака</span>
             ) : (
-              <span>🟢 ДВОЙНОЙ ТАП ДЛЯ ВЫБОРА • СЕНСОРНЫЙ КОНТРОЛЬ</span>
+              <span>🟢 2× ТАП — ВЫБОР • 2× ТАП+ДЕРЖАТЬ — РАМКА</span>
             )}
           </div>
 
           {/* Action Deck */}
-          <div className="ui-panel p-2 flex items-center justify-between gap-3 pointer-events-auto w-full max-w-sm">
-            
-            {/* Split Mode Selector (Replaced with Gesture Help Info) */}
-            <div className="text-[9.5px] font-mono text-slate-400 px-1 leading-normal">
-              <span className="text-cyan-400">Двойной тап:</span> Выбрать Юнит<br />
-              <span className="text-cyan-400">Двойной тап + задержка:</span> Рамка
-            </div>
+          <div className="ui-panel p-1.5 flex items-center justify-center gap-1.5 pointer-events-auto">
 
             {/* Tactical actions */}
             <div className="flex items-center gap-1.5">

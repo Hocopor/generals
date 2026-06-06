@@ -56,13 +56,19 @@ export interface GameEntity {
   x: number;
   z: number;
   angle: number;
-  state: 'idle' | 'moving' | 'attacking' | 'constructing' | 'dead';
+  state: 'idle' | 'moving' | 'attacking' | 'constructing' | 'dead' | 'garrisoned';
   targetX?: number;
   targetZ?: number;
   targetId?: string;
   targetType?: 'unit' | 'building';
   buildProgress?: number; // 0 to 1
   cooldown?: number;
+  // Runtime-only fields the simulation attaches while the game is live.
+  pitch?: number;            // smoothed terrain-following tilt (vehicles)
+  roll?: number;             // smoothed terrain-following roll (vehicles)
+  garrisonedIn?: string;     // id of the civilian building this infantry occupies
+  harvesterState?: 'idle' | 'moving_to_extract' | 'extracting' | 'moving_to_unload' | 'unloading';
+  harvesterCargo?: number;   // resources currently carried by a harvester
 }
 
 // WebSocket message payloads
